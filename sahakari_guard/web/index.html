@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sahakari-Guard</title>
+  <meta name="description" content="Fraud watchdog, privacy shield and 6-hour incident kit for co-operative banks.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/overview">
+      <svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm-1.2 14.2-3.5-3.5 1.4-1.4 2.1 2.1 4.9-4.9 1.4 1.4-6.3 6.3Z"/></svg>
+      <div><b>Sahakari-Guard</b><span id="bank-name"></span></div>
+    </a>
+    <div class="spacer"></div>
+    <span id="net-pill" class="pill" role="status"><span class="dot"></span><span id="net-label"></span></span>
+    <div class="langs" role="group" aria-label="Language">
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="ta" lang="ta">தமிழ்</button>
+      <button type="button" data-lang="hi" lang="hi">हिन्दी</button>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="nav" id="nav" aria-label="Main">
+      <a href="#/overview" data-route="overview" data-i18n="nav.overview">Overview</a>
+      <a href="#/alerts" data-route="alerts"><span data-i18n="nav.alerts">Alerts</span><span class="count" id="nav-alerts" hidden></span></a>
+      <a href="#/incidents" data-route="incidents"><span data-i18n="nav.incidents">Incidents</span><span class="count" id="nav-incidents" hidden></span></a>
+      <hr>
+      <a href="#/demo" data-route="demo" data-i18n="nav.demo">Demo lab</a>
+      <a href="#/upload" data-route="upload" data-i18n="nav.upload">Upload logs</a>
+      <a href="#/privacy" data-route="privacy" data-i18n="nav.privacy">Privacy shield</a>
+      <a href="#/benchmark" data-route="benchmark" data-i18n="nav.benchmark">Benchmark</a>
+      <a href="#/about" data-route="about" data-i18n="nav.about">About</a>
+      <hr>
+      <p class="note" data-i18n="app.watch_only"></p>
+    </nav>
+    <main id="main" tabindex="-1">
+      <p class="muted">Loading…</p>
+    </main>
+  </div>
+  <div id="drawer-root"></div>
+  <noscript><p style="padding:24px">Sahakari-Guard needs JavaScript enabled in this browser.</p></noscript>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

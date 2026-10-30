@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="{{ r.language }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ r.incident.reference }} · {{ tr('report.title') }}</title>
+<style>
+  @font-face { font-family: "SG Sans"; font-weight: 400; src: url(/static/fonts/hind-latin-400-normal.woff2) format("woff2"); unicode-range: U+0000-00FF, U+2000-206F; }
+  @font-face { font-family: "SG Sans"; font-weight: 600; src: url(/static/fonts/hind-latin-600-normal.woff2) format("woff2"); unicode-range: U+0000-00FF, U+2000-206F; }
+  @font-face { font-family: "SG Sans"; font-weight: 400; src: url(/static/fonts/hind-devanagari-400-normal.woff2) format("woff2"); unicode-range: U+0900-097F, U+200C-200D, U+20B9; }
+  @font-face { font-family: "SG Sans"; font-weight: 600; src: url(/static/fonts/hind-devanagari-600-normal.woff2) format("woff2"); unicode-range: U+0900-097F, U+200C-200D, U+20B9; }
+  @font-face { font-family: "SG Sans"; font-weight: 400; src: url(/static/fonts/hind-madurai-tamil-400-normal.woff2) format("woff2"); unicode-range: U+0B82-0BFA, U+200C-200D; }
+  @font-face { font-family: "SG Sans"; font-weight: 600; src: url(/static/fonts/hind-madurai-tamil-600-normal.woff2) format("woff2"); unicode-range: U+0B82-0BFA, U+200C-200D; }
+  :root {
+    --ink: #0f172a; --muted: #475569; --line: #e2e8f0; --soft: #f8fafc;
+    --brand: #0f766e; --critical: #b91c1c; --high: #c2410c; --medium: #a16207;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #fff; color: var(--ink);
+    font: 14px/1.55 "SG Sans", "Segoe UI", system-ui, -apple-system, "Noto Sans", "Noto Sans Tamil", "Nirmala UI", "Latha",
+          "Noto Sans Devanagari", "Mangal", sans-serif;
+  }
+  .page { max-width: 880px; margin: 0 auto; padding: 32px 28px 48px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+           border-bottom: 3px solid var(--brand); padding-bottom: 14px; }
+  .brand { display: flex; gap: 10px; align-items: center; color: var(--brand); font-weight: 700; }
+  h1 { font-size: 22px; margin: 6px 0 2px; }
+  .sub { color: var(--muted); }
+  .ref { text-align: right; font-variant-numeric: tabular-nums; }
+  .ref b { display: block; font-size: 16px; }
+  .notice { margin: 16px 0; padding: 10px 12px; border: 1px solid #fde68a; background: #fffbeb; border-radius: 6px; font-size: 13px; }
+  h2 { font-size: 15px; margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  .kv td { padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kv td:first-child { width: 38%; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--soft); }
+  .stat span { display: block; color: var(--muted); font-size: 12px; }
+  .stat b { font-size: 18px; font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid; }
+  .sev-CRITICAL { color: var(--critical); border-color: #fecaca; background: #fef2f2; }
+  .sev-HIGH { color: var(--high); border-color: #fed7aa; background: #fff7ed; }
+  .sev-MEDIUM { color: var(--medium); border-color: #fde68a; background: #fffbeb; }
+  .sev-LOW { color: var(--muted); border-color: var(--line); background: var(--soft); }
+  .det th, .det td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; font-size: 12.5px; vertical-align: top; }
+  .det th { color: var(--muted); font-weight: 600; background: var(--soft); }
+  .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .det .mono { word-break: normal; white-space: nowrap; }
+  ol, ul { margin: 6px 0 0 20px; padding: 0; }
+  li { margin: 3px 0; }
+  .actions { display: flex; gap: 8px; margin-top: 10px; }
+  button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--brand); background: var(--brand); color: #fff; cursor: pointer; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: repeat(2, 1fr); } header { flex-direction: column; } .ref { text-align: left; } }
+  @media print {
+    .no-print { display: none !important; }
+    .page { padding: 0; max-width: none; }
+    @page { size: A4; margin: 14mm; }
+    h2 { break-after: avoid; }
+    tr { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <div class="brand">
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm-1.2 14.2-3.5-3.5 1.4-1.4 2.1 2.1 4.9-4.9 1.4 1.4-6.3 6.3Z"/></svg>
+        Sahakari-Guard
+      </div>
+      <h1>{{ tr('report.title') }}</h1>
+      <div class="sub">{{ tr('report.subtitle') }}</div>
+    </div>
+    <div class="ref">
+      <b>{{ r.incident.reference }}</b>
+      <span class="badge sev-{{ r.incident.severity }}">{{ r.incident.severity_label }}</span>
+      <div class="sub">{{ r.incident.status_label }}</div>
+    </div>
+  </header>
+
+  <div class="notice">{{ r.notice }}</div>
+  <div class="actions no-print"><button onclick="window.print()">{{ tr('report.print') }}</button></div>
+
+  <h2>1. {{ tr('report.section.entity') }}</h2>
+  <table class="kv">
+    <tr><td>{{ tr('report.field.bank') }}</td><td>{{ r.entity.bank }}</td></tr>
+    <tr><td>{{ tr('report.field.code') }}</td><td>{{ r.entity.code }}</td></tr>
+    <tr><td>{{ tr('report.field.category_bank') }}</td><td>{{ r.entity.category }}</td></tr>
+    <tr><td>{{ tr('report.field.location') }}</td><td>{{ r.entity.location }}</td></tr>
+    <tr><td>{{ tr('report.field.officer') }}</td><td>{{ r.entity.officer }}</td></tr>
+    <tr><td>{{ tr('report.field.contact') }}</td><td>{{ r.entity.email }} · {{ r.entity.phone }}</td></tr>
+  </table>
+
+  <h2>2. {{ tr('report.section.incident') }}</h2>
+  <table class="kv">
+    <tr><td>{{ tr('report.field.reference') }}</td><td>{{ r.incident.reference }}</td></tr>
+    <tr><td>{{ tr('report.field.category') }}</td><td>{{ r.incident.category }}</td></tr>
+    <tr><td>{{ tr('report.field.severity') }}</td><td><span class="badge sev-{{ r.incident.severity }}">{{ r.incident.severity_label }}</span></td></tr>
+    <tr><td>{{ tr('report.field.rules') }}</td><td>{% for rule in r.rules %}{{ rule.rule_id }} · {{ rule.name }} ({{ rule.alerts }}){% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+    {% if r.incident.daksh_ref %}<tr><td>{{ tr('incident.daksh_ref') }}</td><td>{{ r.incident.daksh_ref }}</td></tr>{% endif %}
+  </table>
+
+  <h2>3. {{ tr('report.section.timing') }}</h2>
+  <table class="kv">
+    <tr><td>{{ tr('report.field.first_event') }}</td><td>{{ fmt(r.timing.first_event) }}</td></tr>
+    <tr><td>{{ tr('report.field.last_event') }}</td><td>{{ fmt(r.timing.last_event) }}</td></tr>
+    <tr><td>{{ tr('report.field.first_alert') }}</td><td>{{ fmt(r.timing.first_alert_event_time) }}</td></tr>
+    <tr><td>{{ tr('report.field.opened') }}</td><td>{{ fmt(r.timing.detected_at) }}</td></tr>
+    {% if r.timing.deadline %}<tr><td>{{ tr('report.field.deadline') }}</td><td><b>{{ fmt(r.timing.deadline) }}</b></td></tr>{% endif %}
+    <tr><td>{{ tr('report.field.generated') }}</td><td>{{ fmt(r.timing.generated) }}</td></tr>
+  </table>
+
+  <h2>4. {{ tr('report.section.impact') }}</h2>
+  <div class="grid">
+    <div class="stat"><span>{{ tr('report.field.transactions') }}</span><b>{{ r.impact.transactions }}</b></div>
+    <div class="stat"><span>{{ tr('report.field.amount') }}</span><b>{{ r.impact.amount }}</b></div>
+    <div class="stat"><span>{{ tr('report.field.accounts') }}</span><b>{{ r.impact.accounts }}</b></div>
+    <div class="stat"><span>{{ tr('report.field.channels') }}</span><b>{{ r.impact.channels | join(', ') or '-' }}</b></div>
+  </div>
+  {% if r.impact.countries %}
+  <p><b>{{ tr('report.field.countries') }}:</b> {{ r.impact.countries | join(', ') }}</p>
+  {% endif %}
+
+  <h2>5. {{ tr('report.section.description') }}</h2>
+  <p>{{ r.description }}</p>
+
+  <h2>6. {{ tr('report.section.actions') }}</h2>
+  <ol>{% for a in r.actions %}<li>{{ a }}</li>{% endfor %}</ol>
+
+  <h2>7. {{ tr('report.section.alerts') }}</h2>
+  <table class="det">
+    <thead><tr>
+      <th>{{ tr('col.time') }}</th><th>{{ tr('col.rule') }}</th><th>{{ tr('col.rrn') }}</th>
+      <th>{{ tr('col.account') }}</th><th>{{ tr('col.amount') }}</th><th>{{ tr('col.detected') }}</th>
+    </tr></thead>
+    <tbody>
+    {% for d in detections %}
+      <tr>
+        <td>{{ fmt(d.event_time) }}</td>
+        <td>{{ d.rule_id }}<br><span class="sub">{{ d.rule_name }}</span></td>
+        <td class="mono">{{ d.rrn }}</td>
+        <td class="mono">{{ d.account or '-' }}</td>
+        <td>{{ d.amount }}</td>
+        <td>+{{ d.detected_after }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if more %}<p class="sub">{{ tr('report.more_alerts', n=more) }}</p>{% endif %}
+
+  <h2>8. {{ tr('report.section.evidence') }}</h2>
+  <table class="kv">
+    <tr><td>{{ tr('report.field.files') }}</td><td>
+      {% if r.evidence.source_files %}
+        {% for f in r.evidence.source_files %}<div>{{ f.name }} ({{ f.kind }}, {{ f.rows }})<br><span class="mono">{{ f.sha256 }}</span></div>{% endfor %}
+      {% else %}{{ tr('report.no_files') }}{% endif %}
+    </td></tr>
+    <tr><td>{{ tr('report.field.payload_hash') }}</td><td class="mono">{{ r.evidence.payload_sha256 }}</td></tr>
+  </table>
+
+  {% if r.filing %}
+  <h2>9. {{ tr('report.section.filing') }}</h2>
+  <ul>{% for f in r.filing %}<li>☐ {{ f }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="sub">{{ tr('incident.not_reportable') }}</p>
+  {% endif %}
+
+  <footer>{{ r.generator }} · {{ tr('app.watch_only') }}</footer>
+</div>
+</body>
+</html>

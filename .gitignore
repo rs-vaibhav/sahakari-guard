@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+
+# Runtime data (database, keys, watch offsets) - never commit
+data/
+*.db
+*.db-wal
+*.db-shm
+.token_secret
+watch_state.json
+inbox/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

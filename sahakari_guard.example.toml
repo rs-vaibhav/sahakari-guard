@@ -1,0 +1,35 @@
+# Copy to sahakari_guard.toml, edit, and start with:
+#   python -m sahakari_guard --config sahakari_guard.toml serve
+# Environment variables (SG_DATA_DIR, SG_API_KEY, SG_WEBHOOK_URL, SG_TOKEN_SECRET,
+# SG_LANGUAGE) override this file.
+
+[general]
+data_dir = "data"
+default_language = "ta"          # en, ta or hi - used for SMS / message text
+# webhook_url = "https://sms-gateway.example/hook"   # leave unset to simulate delivery
+
+[bank]
+name = "Demo Urban Co-operative Bank Ltd."
+code = "DEMO-UCB-001"
+location = "Chengalpattu, Tamil Nadu"
+regulator_category = "Urban Co-operative Bank (Tier 2)"
+reporting_officer = "Chief Information Security Officer"
+officer_email = "ciso@demo-ucb.example"
+officer_phone = "+91-44-0000-0000"
+
+[engine]
+match_window_seconds = 180       # switch approval and ledger posting must meet within this time
+retention_seconds = 172800       # keep evaluated transactions 48 h so late postings can close alerts
+velocity_window_seconds = 600
+velocity_debit_threshold = 8     # more than 8 approved debits for one account in 10 minutes
+velocity_credit_threshold = 30   # more than 30 credits for one account in 10 minutes
+foreign_window_seconds = 900
+foreign_count_threshold = 25     # foreign-terminal withdrawals in 15 minutes, bank-wide
+foreign_country_threshold = 5    # ...or this many different countries
+velocity_cooldown_seconds = 1800
+home_country = "IN"
+evidence_limit = 25
+
+[incidents]
+group_window_seconds = 3600
+reporting_deadline_hours = 6

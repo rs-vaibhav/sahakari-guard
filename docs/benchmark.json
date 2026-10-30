@@ -1,0 +1,184 @@
+{
+  "generated_at": "2026-10-29T09:40:53+00:00",
+  "version": "0.1.0",
+  "seed": 42,
+  "transactions_per_day": 12000,
+  "match_window_seconds": 180,
+  "throughput_events_per_second": 30964,
+  "results": [
+    {
+      "scenario": "normal",
+      "attack_transactions": 0,
+      "expected_rules": [],
+      "rules_fired": [],
+      "open_alerts": 0,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": null,
+      "recall": null,
+      "first_alert_seconds": null,
+      "median_ttd_seconds": null,
+      "p95_ttd_seconds": null,
+      "eod_baseline_seconds": null,
+      "attack_start": null,
+      "events": 35934,
+      "engine_seconds": 1.145
+    },
+    {
+      "scenario": "slowcbs",
+      "attack_transactions": 0,
+      "expected_rules": [],
+      "rules_fired": [],
+      "open_alerts": 0,
+      "false_alerts": 0,
+      "transient_alerts": 247,
+      "detected": null,
+      "recall": null,
+      "first_alert_seconds": null,
+      "median_ttd_seconds": null,
+      "p95_ttd_seconds": null,
+      "eod_baseline_seconds": null,
+      "attack_start": null,
+      "events": 35904,
+      "engine_seconds": 1.169
+    },
+    {
+      "scenario": "cosmos",
+      "attack_transactions": 420,
+      "expected_rules": [
+        "SG-R1",
+        "SG-R5",
+        "SG-R6"
+      ],
+      "rules_fired": [
+        "SG-R1",
+        "SG-R5",
+        "SG-R6"
+      ],
+      "open_alerts": 421,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 111.4,
+      "median_ttd_seconds": 189.1,
+      "p95_ttd_seconds": 7472.9,
+      "eod_baseline_seconds": 115200.0,
+      "attack_start": "2026-11-01T02:00:00+05:30",
+      "events": 36645,
+      "engine_seconds": 1.196
+    },
+    {
+      "scenario": "uco",
+      "attack_transactions": 1801,
+      "expected_rules": [
+        "SG-R2",
+        "SG-R5"
+      ],
+      "rules_fired": [
+        "SG-R2",
+        "SG-R5"
+      ],
+      "open_alerts": 1836,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 186.3,
+      "median_ttd_seconds": 189.3,
+      "p95_ttd_seconds": 192.9,
+      "eod_baseline_seconds": 47736.7,
+      "attack_start": "2026-11-01T20:44:23+05:30",
+      "events": 41318,
+      "engine_seconds": 1.321
+    },
+    {
+      "scenario": "replay",
+      "attack_transactions": 20,
+      "expected_rules": [
+        "SG-R3"
+      ],
+      "rules_fired": [
+        "SG-R3"
+      ],
+      "open_alerts": 20,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 28.9,
+      "median_ttd_seconds": 22.0,
+      "p95_ttd_seconds": 36.6,
+      "eod_baseline_seconds": 82359.8,
+      "attack_start": "2026-11-01T11:07:20+05:30",
+      "events": 35999,
+      "engine_seconds": 1.202
+    },
+    {
+      "scenario": "tamper",
+      "attack_transactions": 15,
+      "expected_rules": [
+        "SG-R4"
+      ],
+      "rules_fired": [
+        "SG-R4"
+      ],
+      "open_alerts": 15,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 183.6,
+      "median_ttd_seconds": 183.1,
+      "p95_ttd_seconds": 189.5,
+      "eod_baseline_seconds": 71661.1,
+      "attack_start": "2026-11-01T14:05:38+05:30",
+      "events": 35996,
+      "engine_seconds": 1.202
+    },
+    {
+      "scenario": "ghost",
+      "attack_transactions": 12,
+      "expected_rules": [
+        "SG-R7"
+      ],
+      "rules_fired": [
+        "SG-R7"
+      ],
+      "open_alerts": 12,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 187.4,
+      "median_ttd_seconds": 182.3,
+      "p95_ttd_seconds": 191.0,
+      "eod_baseline_seconds": 75159.4,
+      "attack_start": "2026-11-01T13:07:20+05:30",
+      "events": 35997,
+      "engine_seconds": 1.131
+    },
+    {
+      "scenario": "missing",
+      "attack_transactions": 18,
+      "expected_rules": [
+        "SG-R8"
+      ],
+      "rules_fired": [
+        "SG-R8"
+      ],
+      "open_alerts": 18,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 184.3,
+      "median_ttd_seconds": 182.3,
+      "p95_ttd_seconds": 193.3,
+      "eod_baseline_seconds": 85076.5,
+      "attack_start": "2026-11-01T10:22:03+05:30",
+      "events": 36037,
+      "engine_seconds": 1.124
+    }
+  ]
+}
