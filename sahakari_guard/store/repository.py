@@ -294,7 +294,7 @@ class Repository:
                 evidence.extend(evidence_append[: max(0, evidence_limit - len(evidence))])
             c.execute(
                 "UPDATE alerts SET amount_paise = ?, count = ?, params_json = ?, detected_event_time = "
-                "MAX(detected_event_time, ?), evidence_json = ?, updated_at = ? WHERE alert_id = ?",
+                "MIN(detected_event_time, ?), evidence_json = ?, updated_at = ? WHERE alert_id = ?",
                 (
                     amount, count, json.dumps(params, default=str), iso(detected_event_time),
                     json.dumps(evidence, default=str), utc_now_iso(), alert_id,

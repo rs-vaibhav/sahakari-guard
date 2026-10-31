@@ -22,6 +22,8 @@ class Channel(str, Enum):
     POS = "POS"
     UPI = "UPI"
     IMPS = "IMPS"
+    NEFT = "NEFT"
+    RTGS = "RTGS"
     BRANCH = "BRANCH"  # ledger-only postings (cash, interest, charges); never reconciled
 
 
@@ -104,9 +106,42 @@ class LedgerEntry:
     amount: int
     is_reversal: bool = False
     narration: str = ""
+    utr: str = ""
+    beneficiary_account_no: str = ""
+    beneficiary_ifsc: str = ""
     source_line: int = 0
 
     feed = "ledger"
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileChange:
+    ts: datetime
+    account_no: str
+    field: str  # MOBILE, EMAIL, ADDRESS, NOMINEE, OTHER
+    old_value: str = ""
+    new_value: str = ""
+    changed_by: str = ""
+    channel: str = ""
+    source_line: int = 0
+
+    feed = "profile"
+
+
+@dataclass(frozen=True, slots=True)
+class OutwardPayment:
+    ts: datetime
+    batch_id: str
+    utr: str
+    rail: str
+    debit_account_no: str
+    beneficiary_account_no: str
+    beneficiary_ifsc: str
+    beneficiary_name: str
+    amount: int
+    source_line: int = 0
+
+    feed = "outward"
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,9 +164,9 @@ class SettlementRecord:
         return self.status.upper() == "SETTLED"
 
 
-FeedEvent = Union[SwitchEvent, LedgerEntry, SettlementRecord]
+FeedEvent = Union[SwitchEvent, LedgerEntry, SettlementRecord, ProfileChange, OutwardPayment]
 
-FEED_ORDER = {"switch": 0, "ledger": 1, "settlement": 2}
+FEED_ORDER = {"profile": 0, "switch": 1, "ledger": 2, "outward": 3, "settlement": 4}
 
 
 def event_sort_key(event: FeedEvent) -> tuple:

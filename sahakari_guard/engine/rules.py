@@ -66,6 +66,18 @@ RULES: dict[str, RuleSpec] = {
         "SG-R8", "MISSING_CREDIT", Severity.MEDIUM, "CUSTOMER_SERVICE",
         "Network confirmed an inward credit but the customer's account was not credited.",
     ),
+    "SG-R9": RuleSpec(
+        "SG-R9", "CONTACT_CHANGE_DEBIT", Severity.CRITICAL, "UNAUTHORISED_DEBITS",
+        "Customer contact changed shortly before approved outward debits (account takeover / SMS diversion).",
+    ),
+    "SG-R10": RuleSpec(
+        "SG-R10", "OUTWARD_PAYMENT_MISMATCH", Severity.CRITICAL, "INTEGRITY",
+        "Outgoing payment file does not match core-banking ledger (altered beneficiary, amount or orphan payment).",
+    ),
+    "SG-R11": RuleSpec(
+        "SG-R11", "UNUSUAL_VOLUME_DAY", Severity.HIGH, "UNAUTHORISED_DEBITS",
+        "Unusual cumulative outward debit volume for this type of day (holiday / weekend spike).",
+    ),
 }
 
 

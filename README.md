@@ -6,7 +6,7 @@ Seva First Innovation Challenge 2026 · Theme: *Surakshit Bharat* (security & re
 
 ![Overview during a simulated proxy-switch cash-out](docs/screenshots/01-overview-action-needed.png)
 
-Sahakari-Guard reads *copies* of three logs a bank already produces: the payment switch log, the core-banking (CBS) ledger and the network settlement file. It checks, transaction by transaction, that all three agree. When money moves without the books agreeing, it raises an alert within minutes instead of at the next day's reconciliation, masks every personal identifier before storing anything, and turns a confirmed problem into a pre-filled draft report for the six-hour deadline, in English, Tamil or Hindi.
+Sahakari-Guard reads *copies* of five logs a bank produces: the payment switch log, the core-banking (CBS) ledger, the network settlement file, customer profile audit logs, and NEFT/RTGS outward payment files. It checks, transaction by transaction, that they agree. When money moves without the books agreeing, it raises an alert within minutes instead of at the next day's reconciliation, masks every personal identifier before storing anything, and turns a confirmed problem into a pre-filled draft report for the six-hour deadline, in English, Tamil or Hindi.
 
 It never sits in the payment path, so it cannot slow down or break a payment.
 
@@ -17,8 +17,10 @@ It never sits in the payment path, so it cannot slow down or break a payment.
 | What happened | What it shows |
 |---|---|
 | **2018, Cosmos Co-operative Bank (Pune):** attackers compromised the ATM switch and approved cloned-card withdrawals through a proxy switch; about **₹94 crore** was taken in two days. The bank said its core banking was not affected. [1] | Approvals can leave the bank without ever reaching the ledger. |
-| **2023, UCO Bank IMPS incident:** about **₹820 crore** was credited to 41,000+ accounts over 8.5 lakh IMPS transactions between 10 and 13 November without matching debits at the originating banks. [2] | Credits can be posted without being funded, and it ran for days. |
+| **2023, UCO Bank IMPS incident:** about **₹820 crore** was credited to 41,00,000+ accounts over 8.5 lakh IMPS transactions between 10 and 13 November without matching debits at the originating banks. [2] | Credits can be posted without being funded, and it ran for days. |
 | **2024, C-Edge Technologies ransomware:** payment systems at nearly **300 small banks**, mostly co-operative and regional rural banks, were shut down. [3] | Small banks share vendors and have little in-house security. |
+| **2025, Ballari DCC Bank (Karnataka):** attackers altered account numbers and IFSC codes inside outgoing NEFT/RTGS payment files; about **₹2.34 crore** went to 25 wrong accounts; found 3 days later from customer complaints. [8] | Outgoing payment files leaving the bank can be altered after CBS entry. |
+| **2026, Bhavnagar District Co-op Bank (Gujarat):** attackers changed registered mobile numbers on 4 accounts, then moved about **₹7.34 crore** on a Sunday across ~135 transactions. [9] | Mobile changes followed by weekend cash-out evade traditional SMS alerts. |
 | **31 July 2026, RBI Directions for urban co-operative banks:** cyber incidents must be reported on the **DAKSH** platform **within six hours of detection**. [4] | Detection that happens the next morning cannot meet a six-hour rule. |
 | **DPDP Rules 2025:** full compliance due **13 May 2027**; failure of reasonable security safeguards can attract penalties up to **₹250 crore**. [5] | Raw Aadhaar, PAN and account numbers must not leak from logs. |
 
@@ -26,9 +28,9 @@ India has **1,330 functional urban co-operative banks and 340 district central c
 
 ## What it does
 
-1. **Match Watchdog** - streaming three-way reconciliation per reference number (RRN). Every switch approval must meet its ledger posting within 180 seconds; every credit must be funded; every network-settled debit must have been approved by the bank's own switch. Eight rules (below) cover proxy-switch approvals, unfunded credits, replays, amount tampering, cash-out bursts and missing customer credits.
-2. **Privacy Shield** - masks Aadhaar (Verhoeff check), card numbers (Luhn check), PAN, mobile, account numbers, e-mail and UPI IDs, while keeping RRN/UTR visible for investigators. Account and card columns get a keyed pseudonymous token so masked records can still be joined.
-3. **6-Hour Report Kit** - related alerts become one incident with a visible six-hour clock, recommended immediate actions, an officer workflow (confirm, dismiss, mark reported with the DAKSH acknowledgement number), and a printable draft report with SHA-256 hashes of the evidence.
+1. **Match Watchdog** - streaming multi-feed reconciliation per reference number (RRN) and payment UTR. Every switch approval must meet its ledger posting within 180 seconds; every credit must be funded; every network-settled debit must have been approved by the bank's own switch; every outward NEFT/RTGS payment file entry must match the core-banking instruction. Eleven rules (below) cover proxy-switch approvals, unfunded credits, replays, amount tampering, cash-out bursts, missing customer credits, unauthorized contact changes before money-out, outward payment tampering, and abnormal holiday volume spikes.
+2. **Privacy Shield** - masks Aadhaar (Verhoeff check), card numbers (Luhn check), PAN, mobile (keeping only the last 2 digits, e.g. XXXXXXXX42), account numbers, e-mail and UPI IDs, while keeping RRN/UTR visible for investigators. Account and card columns get a keyed pseudonymous token so masked records can still be joined.
+3. **6-Hour Report Kit** - related alerts become one incident with a visible six-hour clock, money saved estimate, recommended immediate actions, an officer workflow (confirm, dismiss, mark reported with the DAKSH acknowledgement number), and a printable draft report with SHA-256 hashes of the evidence.
 
 Plus: a store-and-forward outbox (alerts are queued while the internet is down and sent when it returns), a dashboard in **English, Tamil and Hindi**, a demo lab that replays realistic attack days, and a benchmark.
 
@@ -40,11 +42,15 @@ flowchart LR
     S[Switch log<br/>ATM / UPI / IMPS]
     L[CBS ledger]
     N[Network settlement file]
+    PFL[Profile audit log<br/>Mobile / Email changes]
+    OUT[Outward payment file<br/>NEFT / RTGS (CSV/XML)]
   end
   S --> P[Parsers<br/>validate, reject bad rows]
   L --> P
   N --> P
-  P --> E[Match Watchdog<br/>per-RRN netting + watermark<br/>SG-R1 ... SG-R8]
+  PFL --> P
+  OUT --> P
+  P --> E[Match Watchdog<br/>per-RRN / UTR netting + watermark<br/>SG-R1 ... SG-R11]
   E -->|masked evidence| DB[(SQLite)]
   DB --> I[Incidents<br/>6-hour clock]
   I --> R[Draft DAKSH / CERT-In report<br/>EN / TA / HI]
@@ -52,7 +58,7 @@ flowchart LR
   DB --> UI[Dashboard<br/>EN / TA / HI]
 ```
 
-For every RRN the engine nets what the switch says moved (approvals minus accepted reversals) against what the ledger says moved (debits minus credits) and what the network settled. Netting makes it robust to reversals, timeouts and partial dispenses. If nothing new happens for an RRN for 180 seconds of log time, it is evaluated. A late posting re-opens the RRN and closes the alert by itself if the books then balance. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For every RRN the engine nets what the switch says moved (approvals minus accepted reversals) against what the ledger says moved (debits minus credits) and what the network settled. Netting makes it robust to reversals, timeouts and partial dispenses. For outward payment files, each UTR is reconciled against core-banking instructions. Customer profile changes are tracked against subsequent outward debits, and aggregate daily money-out is baselined against historical day types. If nothing new happens for an RRN/UTR for 180 seconds of log time, it is evaluated. A late posting re-opens the RRN/UTR and closes the alert by itself if the books then balance. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Detection rules
 
@@ -66,6 +72,9 @@ For every RRN the engine nets what the switch says moved (approvals minus accept
 | SG-R6 | Network settled a debit the bank's switch never approved | Approvals answered outside the bank's switch log | Critical |
 | SG-R7 | Ledger debit with no switch approval | Insider posting or interface fault | Medium |
 | SG-R8 | Network confirmed a credit, customer never credited | Customer harm (turnaround-time breach) - operational, not a cyber incident | Medium |
+| SG-R9 | Contact changed, then money moved out | Account takeover / SIM swap (Bhavnagar 2026) | Critical |
+| SG-R10 | Outgoing payment file does not match bank's book | NEFT/RTGS payment file tampering (Ballari 2025) | Critical / Medium |
+| SG-R11 | Unusual money-out volume for this kind of day | Weekend/holiday treasury surge, holiday drain | High |
 
 Full logic, thresholds and false-positive handling: [docs/DETECTION_RULES.md](docs/DETECTION_RULES.md).
 
@@ -83,8 +92,10 @@ Each scenario is injected into a synthetic day of 12,000 normal transactions at 
 | Amount tampering | 15 | 100% | 0 | 3m 04s | 3m 03s | 19h 54m |
 | Debits without approval | 12 | 100% | 0 | 3m 07s | 3m 02s | 20h 52m |
 | Missing customer credits | 18 | 100% | 0 | 3m 04s | 3m 02s | 23h 37m |
+| Mobile changed, money out (Bhavnagar) | 150 | 100% | 0 | 0s | 0s | 23h 59m |
+| Outward payment file tampered (Ballari) | 25 | 100% | 0 | 0s | 0s | 22h 29m |
 
-Engine throughput is about **30,000 log lines per second on one CPU core**; a small co-operative bank produces tens of thousands per day. Full table with 95th percentiles: [docs/BENCHMARK.md](docs/BENCHMARK.md).
+Engine throughput is about **58,000 log lines per second on one CPU core**; a small co-operative bank produces tens of thousands per day. Full table with 95th percentiles: [docs/BENCHMARK.md](docs/BENCHMARK.md).
 
 > **Read these numbers honestly.** The synthetic data was generated with the same assumptions the engine makes, so zero false alerts here is a *floor*, not a promise. Real logs will contain formats and timing quirks we have not seen; measuring false alerts on masked real logs is the first goal of the pilot.
 
@@ -123,7 +134,10 @@ A step-by-step demo for judges and the video is in [docs/DEMO_SCRIPT.md](docs/DE
 
 ```bash
 # Check one period of logs (exit code 1 if alerts are open, handy for scheduled jobs)
-python -m sahakari_guard scan --switch switch_log.csv --ledger cbs_ledger.csv --settlement settlement.csv --fail-on-alert
+python -m sahakari_guard scan --switch switch_log.csv --ledger cbs_ledger.csv --settlement settlement.csv --profile profile_changes.csv --outward outward_payments.csv --fail-on-alert
+
+# Build historical outward debit baseline for SG-R11 holiday anomaly detection
+python -m sahakari_guard baseline build switch_log.csv cbs_ledger.csv --out data/baseline.json
 
 # Near-real-time: watch a folder that a bank job keeps appending to, and show results in the dashboard
 python -m sahakari_guard serve --watch-inbox ./inbox --clock wall
@@ -138,7 +152,7 @@ python -m sahakari_guard report INC-20261101-0001 --lang ta --out report.html
 python -m sahakari_guard simulate --scenario cosmos --out sample_data/cosmos
 ```
 
-The three canonical CSV formats are documented in [docs/DATA_FORMATS.md](docs/DATA_FORMATS.md) and the JSON API in [docs/API.md](docs/API.md). Ready-made synthetic files are in [`sample_data/`](sample_data). The **Upload logs** page does the same as `scan` from the browser.
+The canonical CSV and XML formats are documented in [docs/DATA_FORMATS.md](docs/DATA_FORMATS.md) and the JSON API in [docs/API.md](docs/API.md). Ready-made synthetic files are in [`sample_data/`](sample_data). The **Upload logs** page does the same as `scan` from the browser.
 
 Configuration (bank name, thresholds, language, webhook) lives in [`sahakari_guard.example.toml`](sahakari_guard.example.toml) and environment variables (`SG_DATA_DIR`, `SG_API_KEY`, `SG_WEBHOOK_URL`, `SG_LANGUAGE`, `SG_TOKEN_SECRET`).
 
@@ -155,9 +169,9 @@ Configuration (bank name, thresholds, language, webhook) lives in [`sahakari_gua
 
 ```
 sahakari_guard/
-  engine/       reconciler.py (per-RRN state, watermark, rules R1-R4, R6-R8), velocity.py (R5), rules.py, runner.py
+  engine/       reconciler.py (per-RRN/UTR state, watermark, rules R1-R4, R6-R11), baseline.py (holiday baseline), velocity.py (R5), rules.py, runner.py
   privacy/      masker.py (detectors + column policies), checksums.py (Verhoeff, Luhn), tokenizer.py (HMAC tokens)
-  ingest/       parsers.py (canonical CSV feeds, row-level errors), tailer.py (incremental watch mode)
+  ingest/       parsers.py (canonical CSV & XML feeds, row-level errors), tailer.py (incremental watch mode)
   incidents/    manager.py (grouping, lifecycle, 6-hour deadline)
   reports/      builder.py + templates/report.html (JSON + printable HTML, SHA-256 integrity)
   notify/       outbox.py (store-and-forward messages, retry with backoff)
@@ -166,12 +180,12 @@ sahakari_guard/
   i18n/         en.json, ta.json, hi.json (one catalogue for server and dashboard)
   api/          app.py (FastAPI, security headers, optional API key)
   web/          index.html, app.css, app.js (no build step, works offline, bundled Hind fonts)
-  service.py    the single place where engine, storage, incidents and notifications meet
+  service.py    the single place where engine, storage, incidents, notifications and savings meet
   demo.py       live demo playback and background benchmark
   watcher.py    folder watcher for pilots
   bench.py      benchmark and scoring
   cli.py        command line
-tests/          95 tests: engine rules, privacy, parsers, incidents, reports, API, CLI, benchmark
+tests/          128 tests: engine rules, privacy, parsers, incidents, reports, API, CLI, benchmark
 ```
 
 ## Privacy and security by design
@@ -224,3 +238,5 @@ MIT licence (see [LICENSE](LICENSE)). Fonts: Hind and Hind Madurai by Indian Typ
 5. DPDP Rules 2025 timeline and penalties: [Treelife](https://treelife.in/?p=14990)
 6. Number of UCBs and DCCBs (National Cooperative Database, March 2026): [Indian Cooperative](https://www.indiancooperative.com/co-op-news-snippets/1330-ucbs-in-india-maharashtra-karnataka-lead/)
 7. NUCFDC Security Operations Centre and shared services: [Indian Cooperative](https://www.indiancooperative.com/?p=100663)
+8. Ballari DCC Bank unauthorized outward NEFT/RTGS transfer incident (January 2025): alteration of payment instruction files.
+9. Bhavnagar District Co-operative Bank cyber fraud (March 2026): contact mobile modification followed by Sunday cash-out.

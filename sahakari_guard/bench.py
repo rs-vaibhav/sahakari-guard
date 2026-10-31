@@ -26,12 +26,93 @@ from sahakari_guard.config import EngineSettings
 from sahakari_guard.engine.reconciler import Reconciler
 from sahakari_guard.engine.runner import run_events
 from sahakari_guard.models import Alert, AlertResolved, AlertUpdate
+from sahakari_guard.money import format_inr, format_inr_short
 from sahakari_guard.privacy.tokenizer import Tokenizer
+from sahakari_guard.simulator.generator import Injection
 from sahakari_guard.simulator.scenarios import SCENARIOS, build_day
-from sahakari_guard.timeutil import IST, fmt_duration, iso
+from sahakari_guard.timeutil import IST, fmt_duration, iso, parse_ts
 
-BENCH_ORDER = ["normal", "slowcbs", "cosmos", "uco", "replay", "tamper", "ghost", "missing"]
+BENCH_ORDER = ["normal", "slowcbs", "cosmos", "uco", "replay", "tamper", "ghost", "missing", "bhavnagar", "ballari"]
 ATTRIBUTION_SLACK = timedelta(minutes=30)
+
+
+def compute_savings(
+    inj: Injection | None,
+    alerts: Iterable[Any],
+    assumed_response_minutes: int = 15,
+    tokenizer: Tokenizer | None = None,
+) -> dict[str, Any] | None:
+    if inj is None or not inj.rrn_amounts:
+        return None
+    total_attack_amount = sum(inj.rrn_amounts.values())
+    if not total_attack_amount:
+        return None
+
+    attack_rrns = inj.rrns
+    attack_tokens = {tokenizer.token(a) for a in inj.accounts} if (tokenizer and inj.accounts) else set()
+
+    hits = []
+    for a in alerts:
+        rid = getattr(a, "rule_id", None) or (a.get("rule_id") if isinstance(a, dict) else "")
+        r_rrn = getattr(a, "rrn", None) or (a.get("rrn") if isinstance(a, dict) else "")
+        tok = getattr(a, "account_token", None) or (a.get("account_token") if isinstance(a, dict) else "")
+        raw_det = getattr(a, "detected_event_time", None) or (a.get("detected_event_time") if isinstance(a, dict) else None)
+        det_ts = raw_det if isinstance(raw_det, datetime) else (parse_ts(raw_det) if raw_det else None)
+        if not det_ts:
+            continue
+
+        is_attr = False
+        if rid == "SG-R5":
+            key = getattr(a, "key", "") or (a.get("key", "") if isinstance(a, dict) else "")
+            if key == "bank:foreign":
+                is_attr = inj.start - ATTRIBUTION_SLACK <= det_ts <= inj.end + ATTRIBUTION_SLACK
+            elif attack_tokens:
+                is_attr = tok in attack_tokens
+            else:
+                is_attr = True
+        elif rid == "SG-R9":
+            is_attr = (tok in attack_tokens) if attack_tokens else True
+        elif rid == "SG-R11":
+            is_attr = inj.start - ATTRIBUTION_SLACK <= det_ts <= inj.end + ATTRIBUTION_SLACK
+        elif r_rrn in attack_rrns:
+            is_attr = True
+
+        if is_attr:
+            hits.append(det_ts)
+
+    if hits:
+        first_alert_ts = min(hits)
+        block_ts = first_alert_ts + timedelta(minutes=assumed_response_minutes)
+        amount_before_first_alert = sum(
+            amt for rrn, amt in inj.rrn_amounts.items() if inj.rrn_times.get(rrn, inj.start) <= first_alert_ts
+        )
+        amount_before_block = sum(
+            amt for rrn, amt in inj.rrn_amounts.items() if inj.rrn_times.get(rrn, inj.start) <= block_ts
+        )
+        amount_saved = max(0, total_attack_amount - amount_before_block)
+        delay_seconds = round((first_alert_ts - inj.start).total_seconds(), 1)
+    else:
+        first_alert_ts = None
+        amount_before_first_alert = total_attack_amount
+        amount_saved = 0
+        delay_seconds = None
+
+    return {
+        "simulated": True,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": assumed_response_minutes,
+        "total_attack_amount_paise": total_attack_amount,
+        "total_attack_amount": format_inr(total_attack_amount),
+        "total_attack_amount_short": format_inr_short(total_attack_amount),
+        "amount_moved_before_alert_paise": amount_before_first_alert,
+        "amount_moved_before_alert": format_inr(amount_before_first_alert),
+        "amount_saved_paise": amount_saved,
+        "amount_saved": format_inr(amount_saved),
+        "amount_saved_short": format_inr_short(amount_saved),
+        "next_morning_loss_paise": total_attack_amount,
+        "next_morning_loss": format_inr(total_attack_amount),
+        "first_alert_delay_seconds": delay_seconds,
+    }
 
 
 def _final_alerts(outputs: list) -> dict[str, Alert]:
@@ -59,6 +140,10 @@ def score_scenario(scenario: str, day, alerts: dict[str, Alert], tokenizer: Toke
             if a.key == "bank:foreign":
                 return inj.start - ATTRIBUTION_SLACK <= a.detected_event_time <= inj.end + ATTRIBUTION_SLACK
             return a.account_token in attack_tokens
+        if a.rule_id == "SG-R9":
+            return a.account_token in attack_tokens
+        if a.rule_id == "SG-R11":
+            return inj.start - ATTRIBUTION_SLACK <= a.detected_event_time <= inj.end + ATTRIBUTION_SLACK
         return a.rrn in attack_rrns
 
     open_alerts = [a for a in alerts.values() if a.status == "OPEN"]
@@ -68,7 +153,16 @@ def score_scenario(scenario: str, day, alerts: dict[str, Alert], tokenizer: Toke
 
     first_detect: dict[str, datetime] = {}
     for a in hits:
-        if a.rule_id == "SG-R5" or a.rrn not in attack_rrns:
+        if a.rule_id in ("SG-R5", "SG-R11"):
+            continue
+        if a.rule_id == "SG-R9":
+            for rrn, acct in inj.rrn_accounts.items():
+                if tokenizer.token(acct) == a.account_token:
+                    t_detect = max(a.detected_event_time, inj.rrn_times.get(rrn, a.detected_event_time))
+                    if rrn not in first_detect or t_detect < first_detect[rrn]:
+                        first_detect[rrn] = t_detect
+            continue
+        if a.rrn not in attack_rrns:
             continue
         current = first_detect.get(a.rrn)
         if current is None or a.detected_event_time < current:
@@ -89,6 +183,7 @@ def score_scenario(scenario: str, day, alerts: dict[str, Alert], tokenizer: Toke
         "p95_ttd_seconds": None,
         "eod_baseline_seconds": None,
         "attack_start": iso(inj.start) if inj else None,
+        "savings": compute_savings(inj, hits),
     }
     if inj and hits:
         first = min(a.detected_event_time for a in hits)
@@ -171,7 +266,9 @@ def to_markdown(bench: dict[str, Any]) -> str:
         "`normal` and `slowcbs` contain no attack: `slowcbs` delays core-banking postings by 4-8 minutes for 20 minutes, "
         "so alerts are raised and must close themselves when the late postings arrive (shown as auto-resolved). "
         "In `cosmos`, a quarter of the withdrawals bypass the bank's switch log entirely and can only be caught "
-        "from the network settlement file, which arrives every two hours; that is why its 95th percentile is longer.",
+        "from the network settlement file, which arrives every two hours; that is why its 95th percentile is longer. "
+        "In `bhavnagar`, registered mobile numbers are changed on a Sunday followed by rapid outward transfers. "
+        "In `ballari`, beneficiary account and IFSC details in the outward payment file are altered vs the core ledger.",
         "",
         f"Engine throughput: **{bench['throughput_events_per_second']:,} events per second** on one CPU core "
         "(switch, ledger and settlement lines combined).",

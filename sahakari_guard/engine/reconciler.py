@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from typing import Callable, Iterable
 
 from sahakari_guard.config import EngineSettings
+from sahakari_guard.engine.baseline import classify_day_type, load_baseline
 from sahakari_guard.engine.evidence import EvidenceBuilder
 from sahakari_guard.engine.rules import RULES
 from sahakari_guard.engine.velocity import VelocityMonitor
@@ -42,10 +43,14 @@ from sahakari_guard.models import (
     EngineOutput,
     FeedEvent,
     LedgerEntry,
+    OutwardPayment,
+    ProfileChange,
     SettlementRecord,
+    Severity,
     SwitchEvent,
 )
-from sahakari_guard.privacy.masker import mask_keep_last
+from sahakari_guard.money import paise_to_str
+from sahakari_guard.privacy.masker import mask_email, mask_keep_last, mask_mobile_last2
 from sahakari_guard.privacy.tokenizer import Tokenizer
 from sahakari_guard.timeutil import iso, to_ist
 
@@ -98,11 +103,28 @@ class RrnState:
             self.evidence.append(row)
 
 
+@dataclass(slots=True)
+class UtrState:
+    utr: str
+    first_ts: datetime
+    last_ts: datetime
+    file_payment: OutwardPayment | None = None
+    ledger_entry: LedgerEntry | None = None
+    evidence: list = field(default_factory=list)
+    deadline: datetime | None = None
+    version: int = 0
+    closed: bool = False
+    open_alert_id: str | None = None
+    open_severity: Severity | None = None
+
+
 @dataclass
 class EngineStats:
     switch_events: int = 0
     ledger_entries: int = 0
     settlement_records: int = 0
+    profile_changes: int = 0
+    outward_payments: int = 0
     ledger_unlinked: int = 0
     duplicate_lines_ignored: int = 0
     approvals: int = 0
@@ -117,7 +139,13 @@ class EngineStats:
 
     @property
     def events(self) -> int:
-        return self.switch_events + self.ledger_entries + self.settlement_records
+        return (
+            self.switch_events
+            + self.ledger_entries
+            + self.settlement_records
+            + self.profile_changes
+            + self.outward_payments
+        )
 
     def to_dict(self) -> dict:
         decided = self.matched + self.mismatched
@@ -126,6 +154,8 @@ class EngineStats:
             "switch_events": self.switch_events,
             "ledger_entries": self.ledger_entries,
             "settlement_records": self.settlement_records,
+            "profile_changes": self.profile_changes,
+            "outward_payments": self.outward_payments,
             "ledger_unlinked": self.ledger_unlinked,
             "duplicate_lines_ignored": self.duplicate_lines_ignored,
             "approvals": self.approvals,
@@ -147,6 +177,7 @@ class Reconciler:
         cfg: EngineSettings,
         tokenizer: Tokenizer,
         id_factory: Callable[[], str] | None = None,
+        baseline: dict[str, Any] | None = None,
     ) -> None:
         self.cfg = cfg
         self.tokenizer = tokenizer
@@ -161,6 +192,26 @@ class Reconciler:
         self._heap: list[tuple[datetime, int, str, int]] = []
         self._purge_heap: list[tuple[datetime, int, str]] = []
         self._seq = itertools.count()
+
+        # SG-R11: Baseline and daily tracking
+        self.baseline = baseline if baseline is not None else load_baseline(cfg.baseline_path)
+        self._current_day: date | None = None
+        self._day_cumulative_outward: int = 0
+        self._open_r11_alert_id: str | None = None
+        self._r11_highest_amount: int = 0
+
+        # SG-R9: Contact change and outward debit tracking
+        self._profile_changes: dict[str, list[ProfileChange]] = {}
+        self._account_debits: dict[str, list[tuple[datetime, int, str, FeedEvent]]] = {}
+        self._seen_debit_rrns: set[str] = set()
+        self._admin_changes: dict[str, list[tuple[datetime, str]]] = {}
+        self._open_r9_alerts: dict[str, str] = {}
+        self._r9_alert_amounts: dict[str, int] = {}
+        self._r9_alert_counts: dict[str, int] = {}
+
+        # SG-R10: Outward payment file and ledger UTR tracking
+        self._utr_states: dict[str, UtrState] = {}
+        self._utr_heap: list[tuple[datetime, int, str, int]] = []
 
     # ================================================================== public API
 
@@ -177,6 +228,10 @@ class Reconciler:
             out.extend(self._on_ledger(event))
         elif isinstance(event, SettlementRecord):
             out.extend(self._on_settlement(event))
+        elif isinstance(event, ProfileChange):
+            out.extend(self._on_profile(event))
+        elif isinstance(event, OutwardPayment):
+            out.extend(self._on_outward(event))
         else:  # pragma: no cover - defensive
             raise TypeError(f"unsupported event type {type(event).__name__}")
         return out
@@ -198,11 +253,17 @@ class Reconciler:
             if st is None or st.closed or st.version != version:
                 continue
             out.extend(self._evaluate(st, self.watermark))
+        while self._utr_heap and self._utr_heap[0][0] <= self.watermark:
+            _, _, utr, version = heapq.heappop(self._utr_heap)
+            st_utr = self._utr_states.get(utr)
+            if st_utr is None or st_utr.closed or st_utr.version != version:
+                continue
+            out.extend(self._evaluate_utr(st_utr, self.watermark))
         self._purge()
         return out
 
     def finalize(self) -> list[EngineOutput]:
-        """End of a complete batch: evaluate every pending RRN at its own deadline."""
+        """End of a complete batch: evaluate every pending RRN and UTR at its own deadline."""
         out: list[EngineOutput] = []
         while self._heap:
             deadline, _, rrn, version = heapq.heappop(self._heap)
@@ -210,11 +271,19 @@ class Reconciler:
             if st is None or st.closed or st.version != version:
                 continue
             out.extend(self._evaluate(st, deadline))
+        while self._utr_heap:
+            deadline, _, utr, version = heapq.heappop(self._utr_heap)
+            st_utr = self._utr_states.get(utr)
+            if st_utr is None or st_utr.closed or st_utr.version != version:
+                continue
+            out.extend(self._evaluate_utr(st_utr, deadline))
         return out
 
     @property
     def pending(self) -> int:
-        return sum(1 for s in self._states.values() if not s.closed)
+        return sum(1 for s in self._states.values() if not s.closed) + sum(
+            1 for s in self._utr_states.values() if not s.closed
+        )
 
     def snapshot_stats(self) -> dict:
         data = self.stats.to_dict()
@@ -266,6 +335,9 @@ class Reconciler:
                 if isinstance(item, Alert):
                     self.stats.alerts_by_rule[item.rule_id] += 1
                 out.append(item)
+            if ev.direction is Direction.DEBIT:
+                out.extend(self._on_debit_for_r9(ev))
+                out.extend(self._on_debit_for_r11(ev))
         elif ev.effective_reversal:
             st.sw_reversed += ev.amount
         st.add_evidence(self.evidence.switch(ev))
@@ -273,6 +345,9 @@ class Reconciler:
         return out
 
     def _on_ledger(self, le: LedgerEntry) -> list[EngineOutput]:
+        if le.channel in (Channel.NEFT, Channel.RTGS) or le.utr:
+            self.stats.ledger_entries += 1
+            return self._on_ledger_utr(le)
         if not le.rrn:
             # Postings without a switch reference (cash deposits, interest...) are out of scope.
             self.stats.ledger_unlinked += 1
@@ -299,9 +374,370 @@ class Reconciler:
             n = st.nonrev[le.drcr.value]
             if n > 1 and le.drcr is st.direction:
                 out.extend(self._duplicate(st, le.ts, "ledger", le.amount, n))
+            if le.drcr is Direction.DEBIT:
+                out.extend(self._on_ledger_debit_for_r9(le))
         st.add_evidence(self.evidence.ledger(le))
         self._touch(st, le.ts)
         return out
+
+    def _on_profile(self, ev: ProfileChange) -> list[EngineOutput]:
+        self.stats.profile_changes += 1
+        token = self.tokenizer.token(ev.account_no)
+        self._profile_changes.setdefault(token, []).append(ev)
+        if ev.changed_by:
+            self._admin_changes.setdefault(ev.changed_by, []).append((ev.ts, token))
+        return self._check_r9(token, ev.account_no, ev.ts)
+
+    def _on_outward(self, ev: OutwardPayment) -> list[EngineOutput]:
+        self.stats.outward_payments += 1
+        st = self._utr_state_for(ev.utr, ev.ts)
+        st.file_payment = ev
+        st.evidence.append(self.evidence.outward(ev))
+        self._touch_utr(st, ev.ts)
+        if st.ledger_entry is not None:
+            return self._evaluate_utr(st, ev.ts)
+        return []
+
+    def _on_ledger_utr(self, le: LedgerEntry) -> list[EngineOutput]:
+        utr = le.utr or le.rrn
+        if not utr:
+            self.stats.ledger_unlinked += 1
+            return []
+        st = self._utr_state_for(utr, le.ts)
+        st.ledger_entry = le
+        st.evidence.append(self.evidence.ledger(le))
+        self._touch_utr(st, le.ts)
+        if st.file_payment is not None:
+            return self._evaluate_utr(st, le.ts)
+        return []
+
+    def _on_debit_for_r9(self, ev: SwitchEvent) -> list[EngineOutput]:
+        if ev.rrn and ev.rrn in self._seen_debit_rrns:
+            return []
+        if ev.rrn:
+            self._seen_debit_rrns.add(ev.rrn)
+        token = self.tokenizer.token(ev.account_no)
+        self._account_debits.setdefault(token, []).append((ev.ts, ev.amount, ev.rrn, ev))
+        return self._check_r9(token, ev.account_no, ev.ts)
+
+    def _on_ledger_debit_for_r9(self, le: LedgerEntry) -> list[EngineOutput]:
+        if le.rrn and le.rrn in self._seen_debit_rrns:
+            return []
+        if le.rrn:
+            self._seen_debit_rrns.add(le.rrn)
+        token = self.tokenizer.token(le.account_no)
+        self._account_debits.setdefault(token, []).append((le.ts, le.amount, le.rrn, le))
+        return self._check_r9(token, le.account_no, le.ts)
+
+    def _check_r9(self, token: str, account_no: str, now: datetime) -> list[EngineOutput]:
+        changes = [p for p in self._profile_changes.get(token, []) if p.field.upper() in ("MOBILE", "EMAIL")]
+        if not changes:
+            return []
+        out: list[EngineOutput] = []
+        for p in changes:
+            win_end = p.ts + timedelta(hours=self.cfg.contact_change_window_hours)
+            matching = [
+                d for d in self._account_debits.get(token, [])
+                if p.ts <= d[0] <= win_end
+            ]
+            total_amt = sum(d[1] for d in matching)
+            count = len(matching)
+            if total_amt >= self.cfg.contact_change_amount_threshold or count >= self.cfg.contact_change_count_threshold:
+                admin_accts = {
+                    tok for t, tok in self._admin_changes.get(p.changed_by, [])
+                    if p.ts - timedelta(hours=self.cfg.admin_account_change_window_hours) <= t <= p.ts + timedelta(hours=self.cfg.admin_account_change_window_hours)
+                }
+                admin_multi = len(admin_accts) >= self.cfg.admin_account_change_threshold
+                params = {
+                    "account": mask_keep_last(account_no or p.account_no),
+                    "field": p.field,
+                    "changed_by": p.changed_by,
+                    "old_value": mask_mobile_last2(p.old_value) if p.field.upper() == "MOBILE" else mask_email(p.old_value),
+                    "new_value": mask_mobile_last2(p.new_value) if p.field.upper() == "MOBILE" else mask_email(p.new_value),
+                    "change_time": iso(p.ts),
+                    "amount": total_amt,
+                    "count": count,
+                    "window_hours": self.cfg.contact_change_window_hours,
+                    "admin_multi_account": admin_multi,
+                    "admin_user": p.changed_by,
+                    "admin_accounts_count": len(admin_accts),
+                }
+
+                if token not in self._open_r9_alerts:
+                    alert_id = self.new_id()
+                    self._open_r9_alerts[token] = alert_id
+                    self._r9_alert_amounts[token] = total_amt
+                    self._r9_alert_counts[token] = count
+                    self.stats.alerts_by_rule["SG-R9"] += 1
+
+                    evidence_list = [self.evidence.profile(p)]
+                    for d in matching[: self.cfg.evidence_limit - 1]:
+                        evidence_list.append(self.evidence.switch(d[3]) if isinstance(d[3], SwitchEvent) else self.evidence.ledger(d[3]))
+
+                    channel_val = ""
+                    if matching:
+                        ev_item = matching[-1][3]
+                        channel_val = ev_item.channel.value if hasattr(ev_item, "channel") else ""
+
+                    alert = Alert(
+                        alert_id=alert_id,
+                        rule_id="SG-R9",
+                        severity=Severity.CRITICAL,
+                        family="UNAUTHORISED_DEBITS",
+                        key=f"contact:{token}",
+                        event_time=p.ts,
+                        detected_event_time=now,
+                        amount=total_amt,
+                        rrn=matching[-1][2] if matching else "",
+                        account_token=token,
+                        account_masked=mask_keep_last(account_no or p.account_no),
+                        channel=channel_val,
+                        count=count,
+                        params=params,
+                        evidence=evidence_list,
+                    )
+                    out.append(alert)
+                elif total_amt != self._r9_alert_amounts.get(token) or count != self._r9_alert_counts.get(token):
+                    self._r9_alert_amounts[token] = total_amt
+                    self._r9_alert_counts[token] = count
+                    evidence_append = []
+                    if matching:
+                        ev_item = matching[-1][3]
+                        evidence_append.append(self.evidence.switch(ev_item) if isinstance(ev_item, SwitchEvent) else self.evidence.ledger(ev_item))
+                    out.append(AlertUpdate(
+                        self._open_r9_alerts[token],
+                        total_amt,
+                        count,
+                        params,
+                        now,
+                        evidence_append,
+                    ))
+                break
+        return out
+
+    def _on_debit_for_r11(self, ev: SwitchEvent) -> list[EngineOutput]:
+        ev_date = to_ist(ev.ts).date()
+        if self._current_day is None or ev_date != self._current_day:
+            self._current_day = ev_date
+            self._day_cumulative_outward = 0
+            self._open_r11_alert_id = None
+            self._r11_highest_amount = 0
+
+        self._day_cumulative_outward += ev.amount
+        hour = to_ist(ev.ts).hour
+        day_type = classify_day_type(ev_date, self.cfg.holidays)
+
+        p95_val = None
+        if self.baseline and "by_day_type" in self.baseline:
+            day_data = self.baseline["by_day_type"].get(day_type, {})
+            hour_data = day_data.get(str(hour))
+            if hour_data:
+                p95_val = hour_data.get("p95")
+
+        if p95_val is not None and p95_val > 0:
+            threshold = max(int(self.cfg.baseline_multiplier * p95_val), self.cfg.baseline_floor)
+            normal_val = p95_val
+        elif day_type == "HOLIDAY":
+            threshold = self.cfg.quiet_day_outward_limit
+            normal_val = self.cfg.quiet_day_outward_limit
+        else:
+            threshold = None
+            normal_val = 0
+
+        if threshold is not None and self._day_cumulative_outward > threshold:
+            params = {
+                "today_amount": self._day_cumulative_outward,
+                "normal_amount": normal_val,
+                "day_type": day_type,
+                "hour": hour,
+                "threshold": threshold,
+            }
+            if self._open_r11_alert_id is None:
+                alert_id = self.new_id()
+                self._open_r11_alert_id = alert_id
+                self._r11_highest_amount = self._day_cumulative_outward
+                self.stats.alerts_by_rule["SG-R11"] += 1
+                return [
+                    Alert(
+                        alert_id=alert_id,
+                        rule_id="SG-R11",
+                        severity=Severity.HIGH,
+                        family="UNAUTHORISED_DEBITS",
+                        key=f"day:{ev_date.isoformat()}:SG-R11",
+                        event_time=ev.ts,
+                        detected_event_time=ev.ts,
+                        amount=self._day_cumulative_outward,
+                        count=1,
+                        channel=ev.channel.value,
+                        params=params,
+                        evidence=[self.evidence.switch(ev)],
+                    )
+                ]
+            elif self._day_cumulative_outward > self._r11_highest_amount:
+                self._r11_highest_amount = self._day_cumulative_outward
+                return [
+                    AlertUpdate(
+                        alert_id=self._open_r11_alert_id,
+                        amount=self._day_cumulative_outward,
+                        count=1,
+                        params=params,
+                        detected_event_time=ev.ts,
+                        evidence_append=[self.evidence.switch(ev)],
+                    )
+                ]
+        return []
+
+    def _utr_state_for(self, utr: str, ts: datetime) -> UtrState:
+        st = self._utr_states.get(utr)
+        if st is None:
+            st = UtrState(utr=utr, first_ts=ts, last_ts=ts)
+            self._utr_states[utr] = st
+        elif ts < st.first_ts:
+            st.first_ts = ts
+        return st
+
+    def _touch_utr(self, st: UtrState, ts: datetime) -> None:
+        if ts > st.last_ts:
+            st.last_ts = ts
+        base = ts if self.watermark is None or ts > self.watermark else self.watermark
+        st.deadline = base + self.window
+        st.version += 1
+        st.closed = False
+        heapq.heappush(self._utr_heap, (st.deadline, next(self._seq), st.utr, st.version))
+
+    def _evaluate_utr(self, st: UtrState, detected: datetime) -> list[EngineOutput]:
+        st.closed = True
+        if st.file_payment and st.ledger_entry:
+            fp, le = st.file_payment, st.ledger_entry
+            diffs = []
+            if fp.beneficiary_account_no != le.beneficiary_account_no:
+                diffs.append("beneficiary_account_no")
+            if fp.beneficiary_ifsc.upper() != le.beneficiary_ifsc.upper():
+                diffs.append("beneficiary_ifsc")
+            if fp.amount != le.amount:
+                diffs.append("amount")
+
+            if diffs:
+                reason = f"File vs ledger mismatch in {', '.join(diffs)}"
+                params = {
+                    "utr": st.utr,
+                    "amount": fp.amount,
+                    "reason": reason,
+                    "diff_fields": ", ".join(diffs),
+                    "file_account": mask_keep_last(fp.beneficiary_account_no),
+                    "ledger_account": mask_keep_last(le.beneficiary_account_no),
+                    "file_ifsc": fp.beneficiary_ifsc,
+                    "ledger_ifsc": le.beneficiary_ifsc,
+                    "file_amount": fp.amount,
+                    "ledger_amount": le.amount,
+                }
+                if st.open_alert_id:
+                    return [AlertUpdate(st.open_alert_id, fp.amount, 1, params, detected)]
+                alert = Alert(
+                    alert_id=self.new_id(),
+                    rule_id="SG-R10",
+                    severity=Severity.CRITICAL,
+                    family="INTEGRITY",
+                    key=f"utr:{st.utr}:SG-R10",
+                    event_time=st.first_ts,
+                    detected_event_time=detected,
+                    amount=fp.amount,
+                    rrn=st.utr,
+                    account_token=self.tokenizer.token(fp.debit_account_no),
+                    account_masked=mask_keep_last(fp.debit_account_no),
+                    channel=fp.rail,
+                    params=params,
+                    evidence=list(st.evidence),
+                )
+                st.open_alert_id = alert.alert_id
+                st.open_severity = Severity.CRITICAL
+                self.stats.alerts_by_rule["SG-R10"] += 1
+                return [alert]
+            else:
+                if st.open_alert_id:
+                    aid = st.open_alert_id
+                    st.open_alert_id = None
+                    st.open_severity = None
+                    return [AlertResolved(aid, "Outward payment matches core-banking ledger.", detected)]
+                return []
+
+        if st.file_payment and not st.ledger_entry:
+            fp = st.file_payment
+            reason = "Payment file row has no matching core-banking ledger instruction"
+            params = {
+                "utr": st.utr,
+                "amount": fp.amount,
+                "reason": reason,
+                "diff_fields": "missing_ledger_instruction",
+                "file_account": mask_keep_last(fp.beneficiary_account_no),
+                "ledger_account": "-",
+                "file_ifsc": fp.beneficiary_ifsc,
+                "ledger_ifsc": "-",
+                "file_amount": fp.amount,
+                "ledger_amount": 0,
+            }
+            if st.open_alert_id:
+                return []
+            alert = Alert(
+                alert_id=self.new_id(),
+                rule_id="SG-R10",
+                severity=Severity.CRITICAL,
+                family="INTEGRITY",
+                key=f"utr:{st.utr}:SG-R10",
+                event_time=st.first_ts,
+                detected_event_time=detected,
+                amount=fp.amount,
+                rrn=st.utr,
+                account_token=self.tokenizer.token(fp.debit_account_no),
+                account_masked=mask_keep_last(fp.debit_account_no),
+                channel=fp.rail,
+                params=params,
+                evidence=list(st.evidence),
+            )
+            st.open_alert_id = alert.alert_id
+            st.open_severity = Severity.CRITICAL
+            self.stats.alerts_by_rule["SG-R10"] += 1
+            return [alert]
+
+        if st.ledger_entry and not st.file_payment:
+            le = st.ledger_entry
+            reason = "Instruction in ledger not sent in outward payment file"
+            params = {
+                "utr": st.utr,
+                "amount": le.amount,
+                "reason": reason,
+                "diff_fields": "instruction_not_sent",
+                "file_account": "-",
+                "ledger_account": mask_keep_last(le.beneficiary_account_no),
+                "file_ifsc": "-",
+                "ledger_ifsc": le.beneficiary_ifsc,
+                "file_amount": 0,
+                "ledger_amount": le.amount,
+            }
+            if st.open_alert_id:
+                return []
+            alert = Alert(
+                alert_id=self.new_id(),
+                rule_id="SG-R10",
+                severity=Severity.MEDIUM,
+                family="INTEGRITY",
+                key=f"utr:{st.utr}:SG-R10",
+                event_time=st.first_ts,
+                detected_event_time=detected,
+                amount=le.amount,
+                rrn=st.utr,
+                account_token=self.tokenizer.token(le.account_no),
+                account_masked=mask_keep_last(le.account_no),
+                channel=le.channel.value,
+                params=params,
+                evidence=list(st.evidence),
+            )
+            st.open_alert_id = alert.alert_id
+            st.open_severity = Severity.MEDIUM
+            self.stats.alerts_by_rule["SG-R10"] += 1
+            return [alert]
+
+        return []
 
     def _on_settlement(self, rec: SettlementRecord) -> list[EngineOutput]:
         st = self._state_for(rec.rrn, rec.txn_ts if rec.txn_ts and rec.txn_ts < rec.ts else rec.ts)

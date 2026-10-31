@@ -20,7 +20,7 @@ def test_health_config_and_pages(client):
     assert client.get("/api/health").json()["status"] == "ok"
     cfg = client.get("/api/config").json()
     assert cfg["languages"] == ["en", "ta", "hi"]
-    assert {r["rule_id"] for r in cfg["rules"]} == {f"SG-R{i}" for i in range(1, 9)}
+    assert {r["rule_id"] for r in cfg["rules"]} == {f"SG-R{i}" for i in range(1, 12)}
     page = client.get("/")
     assert page.status_code == 200 and "Sahakari-Guard" in page.text
     assert "script-src 'self'" in page.headers["content-security-policy"]
@@ -79,7 +79,7 @@ def test_upload_flow_and_incident_actions(client):
 def test_upload_errors(client):
     bad = client.post("/api/upload", files=[("files", ("x.csv", "foo,bar\n1,2\n", "text/csv"))])
     assert bad.status_code == 400 and "could not recognise" in bad.json()["error"]
-    many = client.post("/api/upload", files=[("files", (f"{i}.csv", "a\n", "text/csv")) for i in range(4)])
+    many = client.post("/api/upload", files=[("files", (f"{i}.csv", "a\n", "text/csv")) for i in range(6)])
     assert many.status_code == 400
 
 
@@ -87,6 +87,27 @@ def test_samples_download(client):
     r = client.get("/api/samples/cosmos/switch.csv")
     assert r.status_code == 200 and r.text.startswith("ts,rrn,channel")
     assert client.get("/api/samples/nope/switch.csv").status_code == 404
+    r_prof = client.get("/api/samples/bhavnagar/profile.csv")
+    assert r_prof.status_code == 200 and "account_no" in r_prof.text
+    r_out = client.get("/api/samples/ballari/outward.csv")
+    assert r_out.status_code == 200 and "utr" in r_out.text
+
+
+def test_demo_bhavnagar_and_savings_on_incident(client):
+    r = client.post("/api/demo/start", json={"scenario": "bhavnagar", "instant": True, "transactions": 2000})
+    assert r.status_code == 200
+    status = _wait_demo(client)
+    assert status["phase"] == "done", status
+    assert status.get("savings") is not None
+    assert status["savings"]["amount_saved_paise"] > 0
+
+    incidents = client.get("/api/incidents").json()
+    assert len(incidents) > 0
+    iid = incidents[0]["incident_id"]
+    detail = client.get(f"/api/incidents/{iid}").json()
+    assert "savings" in detail
+    assert detail["savings"]["simulated"] is True
+    assert "total_attack_amount" in detail["savings"]
 
 
 def test_privacy_endpoints(client):

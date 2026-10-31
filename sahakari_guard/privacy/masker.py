@@ -85,6 +85,16 @@ def mask_mobile(value: str) -> str:
     return "XXXXXX" + digits[-4:]
 
 
+def mask_mobile_last2(value: str) -> str:
+    """Mask mobile number, keeping only the last 2 digits, e.g. XXXXXXXX42."""
+    digits = _digits(value)
+    if not digits:
+        return "X" * len(value or "") if value else ""
+    if len(digits) <= 2:
+        return "X" * len(digits)
+    return "X" * (len(digits) - 2) + digits[-2:]
+
+
 def mask_email(value: str) -> str:
     text = (value or "").strip()
     if "@" not in text:

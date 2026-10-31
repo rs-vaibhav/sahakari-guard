@@ -18,13 +18,21 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from sahakari_guard.ingest.parsers import write_ledger_csv, write_settlement_csv, write_switch_csv
+from sahakari_guard.ingest.parsers import (
+    write_ledger_csv,
+    write_outward_csv,
+    write_profile_csv,
+    write_settlement_csv,
+    write_switch_csv,
+)
 from sahakari_guard.models import (
     Channel,
     Direction,
     FeedEvent,
     LedgerEntry,
     MsgType,
+    OutwardPayment,
+    ProfileChange,
     SettlementRecord,
     SwitchEvent,
     event_sort_key,
@@ -67,7 +75,7 @@ NRI_COUNTRIES = ["AE", "SG", "QA", "SA", "US", "GB"]
 
 @dataclass
 class SimConfig:
-    day: date = date(2026, 11, 1)
+    day: date = date(2026, 11, 2)
     transactions: int = 12_000
     accounts: int = 4_000
     merchant_accounts: int = 12
@@ -110,11 +118,16 @@ class Injection:
     accounts: set[str] = field(default_factory=set)
     expected_rules: set[str] = field(default_factory=set)
     rrn_times: dict[str, datetime] = field(default_factory=dict)
+    rrn_accounts: dict[str, str] = field(default_factory=dict)
+    rrn_amounts: dict[str, int] = field(default_factory=dict)
 
-    def add(self, rrn: str, ts: datetime, account_no: str) -> None:
+    def add(self, rrn: str, ts: datetime, account_no: str, amount: int = 0) -> None:
         self.rrns.add(rrn)
         self.accounts.add(account_no)
         self.rrn_times[rrn] = ts
+        self.rrn_accounts[rrn] = account_no
+        if amount:
+            self.rrn_amounts[rrn] = amount
 
 
 @dataclass
@@ -123,10 +136,12 @@ class SimDay:
     switch: list[SwitchEvent] = field(default_factory=list)
     ledger: list[LedgerEntry] = field(default_factory=list)
     settlement: list[SettlementRecord] = field(default_factory=list)
+    profile: list[ProfileChange] = field(default_factory=list)
+    outward: list[OutwardPayment] = field(default_factory=list)
     injection: Injection | None = None
 
     def events(self) -> list[FeedEvent]:
-        merged: list[FeedEvent] = [*self.switch, *self.ledger, *self.settlement]
+        merged: list[FeedEvent] = [*self.switch, *self.ledger, *self.settlement, *self.profile, *self.outward]
         merged.sort(key=event_sort_key)
         return merged
 
@@ -145,6 +160,12 @@ class SimDay:
         write_switch_csv(sorted(self.switch, key=event_sort_key), paths["switch"])
         write_ledger_csv(sorted(self.ledger, key=event_sort_key), paths["ledger"])
         write_settlement_csv(sorted(self.settlement, key=event_sort_key), paths["settlement"])
+        if self.profile:
+            paths["profile"] = out / "profile_changes.csv"
+            write_profile_csv(sorted(self.profile, key=event_sort_key), paths["profile"])
+        if self.outward:
+            paths["outward"] = out / "outward_payments.csv"
+            write_outward_csv(sorted(self.outward, key=event_sort_key), paths["outward"])
         return paths
 
 
@@ -242,11 +263,36 @@ class TrafficBuilder:
     def add_ledger(
         self, ts: datetime, rrn: str, channel: Channel, cust: Customer, drcr: Direction, amount: int,
         *, is_reversal: bool = False, narration: str = "",
+        utr: str = "", beneficiary_account_no: str = "", beneficiary_ifsc: str = "",
     ) -> None:
         self.day.ledger.append(
             LedgerEntry(
                 ts=ts, journal_id=self.journal_id(), rrn=rrn, channel=channel, account_no=cust.account_no,
                 drcr=drcr, amount=amount, is_reversal=is_reversal, narration=narration,
+                utr=utr, beneficiary_account_no=beneficiary_account_no, beneficiary_ifsc=beneficiary_ifsc,
+            )
+        )
+
+    def add_profile_change(
+        self, ts: datetime, account_no: str, field: str, old_value: str, new_value: str,
+        changed_by: str, channel: str = "CBS_BRANCH",
+    ) -> None:
+        self.day.profile.append(
+            ProfileChange(
+                ts=ts, account_no=account_no, field=field, old_value=old_value,
+                new_value=new_value, changed_by=changed_by, channel=channel,
+            )
+        )
+
+    def add_outward(
+        self, ts: datetime, batch_id: str, utr: str, rail: str, debit_account_no: str,
+        beneficiary_account_no: str, beneficiary_ifsc: str, beneficiary_name: str, amount: int,
+    ) -> None:
+        self.day.outward.append(
+            OutwardPayment(
+                ts=ts, batch_id=batch_id, utr=utr, rail=rail, debit_account_no=debit_account_no,
+                beneficiary_account_no=beneficiary_account_no, beneficiary_ifsc=beneficiary_ifsc,
+                beneficiary_name=beneficiary_name, amount=amount,
             )
         )
 

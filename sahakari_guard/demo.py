@@ -11,10 +11,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from sahakari_guard.bench import run_benchmark, to_markdown
+from sahakari_guard.bench import compute_savings, run_benchmark, to_markdown
 from sahakari_guard.simulator.scenarios import SCENARIOS, build_day, playback_window
 from sahakari_guard.timeutil import IST, iso
 
@@ -44,7 +44,10 @@ class DemoRunner:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return dict(self._state)
+            st = dict(self._state)
+            if "savings" not in st or st["savings"] is None:
+                st["savings"] = self.service.repo.kv_get("simulation_savings")
+            return st
 
     def _set(self, **fields: Any) -> None:
         with self._lock:
@@ -80,6 +83,7 @@ class DemoRunner:
                 "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "new_alerts": 0,
                 "error": None,
+                "savings": None,
             }
         self._thread = threading.Thread(
             target=self._run_guarded, args=(scenario, speed, seed, transactions, instant), name="demo-runner", daemon=True
@@ -105,17 +109,28 @@ class DemoRunner:
             self.service.publish_live_stats("demo", None)
             self.service._run_lock.release()  # noqa: SLF001
 
-    def _apply(self, engine, outputs, run_id: str) -> None:
+    def _apply(self, engine, outputs, run_id: str, inj=None) -> None:
         if outputs:
             result = self.service.apply_outputs(outputs, run_id)
             with self._lock:
                 self._state["new_alerts"] = self._state.get("new_alerts", 0) + result["new_alerts"]
+            if inj:
+                alerts, _ = self.service.repo.list_alerts(limit=5000)
+                savings = compute_savings(inj, alerts, tokenizer=self.service.tokenizer)
+                if savings:
+                    self.service.repo.kv_set("simulation_savings", savings)
+                    with self._lock:
+                        self._state["savings"] = savings
         self.service.publish_live_stats("demo", engine.snapshot_stats())
 
     def _run(self, scenario: str, speed: int, seed: int, transactions: int, instant: bool) -> None:
         svc = self.service
-        # Use today's date so log times and the dashboard clock read naturally in a live demo.
-        day = build_day(scenario, seed=seed, transactions=transactions, day=datetime.now(IST).date())
+        sim_date = datetime.now(IST).date()
+        if scenario == "bhavnagar" and sim_date.weekday() != 6:
+            sim_date = date(2026, 11, 8)
+        elif scenario != "bhavnagar" and sim_date.weekday() in (5, 6):
+            sim_date = date(2026, 11, 2)
+        day = build_day(scenario, seed=seed, transactions=transactions, day=sim_date)
         events = day.events()
         svc.reset_data()
         run_id = svc.begin_run("demo", f"{scenario} (seed {seed}, x{speed})")
@@ -154,7 +169,7 @@ class DemoRunner:
         self._set(phase="fast_forward")
         while idx < total and events[idx].ts < live_start and not self._stop.is_set():
             outputs = feed_until(live_start, FAST_FORWARD_CHUNK)
-            self._apply(engine, outputs, run_id)
+            self._apply(engine, outputs, run_id, day.injection)
             self._set(events_done=idx, progress=round(idx / total, 4), sim_clock=iso(engine.watermark))
 
         # Phase 2: play the attack window at the chosen speed with a heartbeat.
@@ -169,7 +184,7 @@ class DemoRunner:
                 last = now
                 outputs = feed_until(sim)
                 outputs.extend(engine.advance(sim))
-                self._apply(engine, outputs, run_id)
+                self._apply(engine, outputs, run_id, day.injection)
                 self._set(events_done=idx, progress=round(idx / total, 4), sim_clock=iso(sim))
 
         if self._stop.is_set():
@@ -183,13 +198,19 @@ class DemoRunner:
         self._set(phase="finishing")
         while idx < total and not self._stop.is_set():
             outputs = feed_until(None, FAST_FORWARD_CHUNK)
-            self._apply(engine, outputs, run_id)
+            self._apply(engine, outputs, run_id, day.injection)
             self._set(events_done=idx, progress=round(idx / total, 4), sim_clock=iso(engine.watermark))
-        self._apply(engine, engine.finalize(), run_id)
+        self._apply(engine, engine.finalize(), run_id, day.injection)
         stats = engine.snapshot_stats()
         svc.publish_live_stats("demo", None)
         svc.add_base_stats(stats)
         svc.end_run(run_id, "DONE", stats)
+        if day.injection:
+            alerts, _ = svc.repo.list_alerts(limit=5000)
+            savings = compute_savings(day.injection, alerts, tokenizer=svc.tokenizer)
+            if savings:
+                svc.repo.kv_set("simulation_savings", savings)
+                self._set(savings=savings)
         self._set(phase="done", progress=1.0, events_done=total, sim_clock=iso(engine.watermark),
                   finished_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
 

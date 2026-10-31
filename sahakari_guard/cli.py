@@ -91,7 +91,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     from sahakari_guard.i18n import render_alert
 
     svc = _service(args)
-    paths = [p for p in (args.switch, args.ledger, args.settlement) if p]
+    paths = [p for p in (args.switch, args.ledger, args.settlement, args.profile, args.outward) if p]
     uploads = [(Path(p).name, Path(p).read_bytes()) for p in paths]
     result = svc.scan_uploads(uploads)
     if args.json:
@@ -186,6 +186,22 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_baseline(args: argparse.Namespace) -> int:
+    if args.baseline_subcommand == "build":
+        from sahakari_guard.engine.baseline import build_baseline_from_files, save_baseline
+
+        files = [Path(p) for p in args.files]
+        settings = _settings(args)
+        out_path = Path(args.out) if args.out else Path(settings.data_dir) / "baseline.json"
+        baseline, warnings = build_baseline_from_files(files, settings.engine.holidays)
+        save_baseline(baseline, out_path)
+        _print(f"Built baseline from {len(files)} file(s) -> {out_path}")
+        for w in warnings:
+            _print(f"Warning: {w}")
+        return 0
+    return 0
+
+
 def cmd_reset(args: argparse.Namespace) -> int:
     svc = _service(args)
     svc.reset()
@@ -224,11 +240,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--switch", required=True)
     p.add_argument("--ledger", required=True)
     p.add_argument("--settlement")
+    p.add_argument("--profile", help="customer profile changes audit log (CSV)")
+    p.add_argument("--outward", help="NEFT/RTGS outward payment file (CSV or XML)")
     p.add_argument("--lang", choices=SUPPORTED_LANGUAGES, default="en")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--json", action="store_true")
     p.add_argument("--fail-on-alert", action="store_true", help="exit with status 1 if alerts are open")
     p.set_defaults(func=cmd_scan)
+
+    p_base = sub.add_parser("baseline", help="manage transaction baselines for SG-R11")
+    base_sub = p_base.add_subparsers(dest="baseline_subcommand", required=True)
+    p_b_build = base_sub.add_parser("build", help="build baseline.json from ledger/switch files")
+    p_b_build.add_argument("files", nargs="+", help="path to ledger or switch CSV files")
+    p_b_build.add_argument("--out", help="output path (default: <data_dir>/baseline.json)")
+    p_base.set_defaults(func=cmd_baseline)
 
     p = sub.add_parser("watch", help="watch an inbox folder and check new log lines continuously")
     p.add_argument("--inbox", required=True)

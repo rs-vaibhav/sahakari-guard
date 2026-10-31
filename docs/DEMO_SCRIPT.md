@@ -1,6 +1,25 @@
-# Demo script (2½ minutes)
+# Demo scripts
 
-Use this for the internal round, the judges and the video. Start the dashboard first (`scripts\run.bat` or `./scripts/run.sh`) and open http://127.0.0.1:8000. In **Demo lab**, press **Clear all data** so you start from "No data yet".
+Choose either the classic Cosmos proxy-switch demo or the new Bhavnagar Sunday attack demo. Start the dashboard first (`scripts\run.bat` or `./scripts/run.sh`) and open http://127.0.0.1:8000. In **Demo lab**, press **Clear all data** so you start from "No data yet".
+
+---
+
+## 2-minute script: Bhavnagar Sunday attack (March 2026 pattern)
+
+This demonstrates the new 2026 attack pattern: insider/admin mobile number tampering on a Sunday followed by rapid UPI/IMPS outward transfers, and the **Money Saved by Early Alert** calculation.
+
+| Time | On screen | Say |
+|---|---|---|
+| 0:00 - 0:20 | Overview: "No data yet" | "In March 2026, attackers compromised administrative credentials at Bhavnagar District Co-op Bank. On a quiet Sunday morning between 9:00 and 9:20, they changed registered mobile numbers on 4 high-balance accounts so all OTPs and SMS alerts went to the attackers. Then starting at 10:00, they moved approximately ₹7.34 crore to ~135 mule accounts. Because core banking debited each account cleanly, conventional switch-ledger reconcilers stayed completely silent." |
+| 0:20 - 0:35 | Demo lab: select **Mobile hijack & Sunday drain** (`bhavnagar`), speed ×300, press **Play scenario** | "Watch the demo clock advance through Sunday morning. At 09:00, the customer profile changes log records the mobile updates. At 10:00, rapid outward IMPS/UPI debits begin." |
+| 0:35 - 0:55 | Overview: turns RED within minutes of the first transfer; 6-hour clock starts | "Within 30 seconds of the first transfer, Sahakari-Guard flags Rule SG-R9: 'Contact changed, then money out'. Notice the dashboard turns RED immediately and the RBI 6-hour DAKSH reporting countdown begins." |
+| 0:55 - 1:15 | Click the open SG-R9 alert | "Open the alert drawer: it correlates the core-banking audit log with the outward switch payments. The officer sees the exact staff ID that changed the phone number, the masked old/new numbers (keeping only the last two digits for privacy), and the rapid outward transfers." |
+| 1:15 - 1:35 | Open the Incident page; click **தமிழ்** (Tamil) report | "All alerts across the compromised accounts are grouped into one Cyber Incident. With one click, the officer gets a complete, pre-filled RBI/CERT-In incident report in Tamil (or English/Hindi) with SHA-256 evidence hashes." |
+| 1:35 - 2:00 | Incident / Demo lab: point to **Money saved by early alert** panel | "Here is the critical save: in the real world, the attack was only discovered on Monday at 10:00 AM, losing all ₹7.34 crore. With Sahakari-Guard's alert within minutes, if the duty officer blocks the 4 accounts within 15 minutes, over ₹5.5 crore of the ₹7.34 crore is saved before it leaves the bank." |
+
+---
+
+## Classic script: Cosmos Bank proxy-switch cash-out (2½ minutes)
 
 | Time | On screen | Say |
 |---|---|---|

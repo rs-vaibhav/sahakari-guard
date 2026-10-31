@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-10-29T09:40:53+00:00",
+  "generated_at": "2026-10-30T21:19:35+00:00",
   "version": "0.1.0",
   "seed": 42,
   "transactions_per_day": 12000,
   "match_window_seconds": 180,
-  "throughput_events_per_second": 30964,
+  "throughput_events_per_second": 58202,
   "results": [
     {
       "scenario": "normal",
@@ -21,8 +21,9 @@
       "p95_ttd_seconds": null,
       "eod_baseline_seconds": null,
       "attack_start": null,
+      "savings": null,
       "events": 35934,
-      "engine_seconds": 1.145
+      "engine_seconds": 0.651
     },
     {
       "scenario": "slowcbs",
@@ -39,8 +40,9 @@
       "p95_ttd_seconds": null,
       "eod_baseline_seconds": null,
       "attack_start": null,
+      "savings": null,
       "events": 35904,
-      "engine_seconds": 1.169
+      "engine_seconds": 0.609
     },
     {
       "scenario": "cosmos",
@@ -52,10 +54,11 @@
       ],
       "rules_fired": [
         "SG-R1",
+        "SG-R11",
         "SG-R5",
         "SG-R6"
       ],
-      "open_alerts": 421,
+      "open_alerts": 422,
       "false_alerts": 0,
       "transient_alerts": 0,
       "detected": true,
@@ -64,9 +67,25 @@
       "median_ttd_seconds": 189.1,
       "p95_ttd_seconds": 7472.9,
       "eod_baseline_seconds": 115200.0,
-      "attack_start": "2026-11-01T02:00:00+05:30",
+      "attack_start": "2026-11-02T02:00:00+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 584400000,
+        "total_attack_amount": "\u20b958,44,000.00",
+        "total_attack_amount_short": "\u20b958.44 L",
+        "amount_moved_before_alert_paise": 8800000,
+        "amount_moved_before_alert": "\u20b988,000.00",
+        "amount_saved_paise": 521500000,
+        "amount_saved": "\u20b952,15,000.00",
+        "amount_saved_short": "\u20b952.15 L",
+        "next_morning_loss_paise": 584400000,
+        "next_morning_loss": "\u20b958,44,000.00",
+        "first_alert_delay_seconds": 111.4
+      },
       "events": 36645,
-      "engine_seconds": 1.196
+      "engine_seconds": 0.621
     },
     {
       "scenario": "uco",
@@ -88,9 +107,25 @@
       "median_ttd_seconds": 189.3,
       "p95_ttd_seconds": 192.9,
       "eod_baseline_seconds": 47736.7,
-      "attack_start": "2026-11-01T20:44:23+05:30",
+      "attack_start": "2026-11-02T20:44:23+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 4013956000,
+        "total_attack_amount": "\u20b94,01,39,560.00",
+        "total_attack_amount_short": "\u20b94.01 Cr",
+        "amount_moved_before_alert_paise": 35999800,
+        "amount_moved_before_alert": "\u20b93,59,998.00",
+        "amount_saved_paise": 2981467300,
+        "amount_saved": "\u20b92,98,14,673.00",
+        "amount_saved_short": "\u20b92.98 Cr",
+        "next_morning_loss_paise": 4013956000,
+        "next_morning_loss": "\u20b94,01,39,560.00",
+        "first_alert_delay_seconds": 186.3
+      },
       "events": 41318,
-      "engine_seconds": 1.321
+      "engine_seconds": 0.702
     },
     {
       "scenario": "replay",
@@ -110,9 +145,25 @@
       "median_ttd_seconds": 22.0,
       "p95_ttd_seconds": 36.6,
       "eod_baseline_seconds": 82359.8,
-      "attack_start": "2026-11-01T11:07:20+05:30",
+      "attack_start": "2026-11-02T11:07:20+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 7200157,
+        "total_attack_amount": "\u20b972,001.57",
+        "total_attack_amount_short": "\u20b972,001",
+        "amount_moved_before_alert_paise": 13108,
+        "amount_moved_before_alert": "\u20b9131.08",
+        "amount_saved_paise": 7187049,
+        "amount_saved": "\u20b971,870.49",
+        "amount_saved_short": "\u20b971,870",
+        "next_morning_loss_paise": 7200157,
+        "next_morning_loss": "\u20b972,001.57",
+        "first_alert_delay_seconds": 28.9
+      },
       "events": 35999,
-      "engine_seconds": 1.202
+      "engine_seconds": 0.615
     },
     {
       "scenario": "tamper",
@@ -132,9 +183,25 @@
       "median_ttd_seconds": 183.1,
       "p95_ttd_seconds": 189.5,
       "eod_baseline_seconds": 71661.1,
-      "attack_start": "2026-11-01T14:05:38+05:30",
+      "attack_start": "2026-11-02T14:05:38+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 21900000,
+        "total_attack_amount": "\u20b92,19,000.00",
+        "total_attack_amount_short": "\u20b92.19 L",
+        "amount_moved_before_alert_paise": 2100000,
+        "amount_moved_before_alert": "\u20b921,000.00",
+        "amount_saved_paise": 12100000,
+        "amount_saved": "\u20b91,21,000.00",
+        "amount_saved_short": "\u20b91.21 L",
+        "next_morning_loss_paise": 21900000,
+        "next_morning_loss": "\u20b92,19,000.00",
+        "first_alert_delay_seconds": 183.6
+      },
       "events": 35996,
-      "engine_seconds": 1.202
+      "engine_seconds": 0.616
     },
     {
       "scenario": "ghost",
@@ -154,9 +221,25 @@
       "median_ttd_seconds": 182.3,
       "p95_ttd_seconds": 191.0,
       "eod_baseline_seconds": 75159.4,
-      "attack_start": "2026-11-01T13:07:20+05:30",
+      "attack_start": "2026-11-02T13:07:20+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 65274300,
+        "total_attack_amount": "\u20b96,52,743.00",
+        "total_attack_amount_short": "\u20b96.53 L",
+        "amount_moved_before_alert_paise": 12133600,
+        "amount_moved_before_alert": "\u20b91,21,336.00",
+        "amount_saved_paise": 18945600,
+        "amount_saved": "\u20b91,89,456.00",
+        "amount_saved_short": "\u20b91.89 L",
+        "next_morning_loss_paise": 65274300,
+        "next_morning_loss": "\u20b96,52,743.00",
+        "first_alert_delay_seconds": 187.4
+      },
       "events": 35997,
-      "engine_seconds": 1.131
+      "engine_seconds": 0.605
     },
     {
       "scenario": "missing",
@@ -176,9 +259,105 @@
       "median_ttd_seconds": 182.3,
       "p95_ttd_seconds": 193.3,
       "eod_baseline_seconds": 85076.5,
-      "attack_start": "2026-11-01T10:22:03+05:30",
+      "attack_start": "2026-11-02T10:22:03+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 1121727,
+        "total_attack_amount": "\u20b911,217.27",
+        "total_attack_amount_short": "\u20b911,217",
+        "amount_moved_before_alert_paise": 6172,
+        "amount_moved_before_alert": "\u20b961.72",
+        "amount_saved_paise": 814757,
+        "amount_saved": "\u20b98,147.57",
+        "amount_saved_short": "\u20b98,147",
+        "next_morning_loss_paise": 1121727,
+        "next_morning_loss": "\u20b911,217.27",
+        "first_alert_delay_seconds": 184.3
+      },
       "events": 36037,
-      "engine_seconds": 1.124
+      "engine_seconds": 0.605
+    },
+    {
+      "scenario": "bhavnagar",
+      "attack_transactions": 150,
+      "expected_rules": [
+        "SG-R11",
+        "SG-R5",
+        "SG-R9"
+      ],
+      "rules_fired": [
+        "SG-R11",
+        "SG-R5",
+        "SG-R9"
+      ],
+      "open_alerts": 9,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 0.0,
+      "median_ttd_seconds": 0.0,
+      "p95_ttd_seconds": 0.0,
+      "eod_baseline_seconds": 86391.0,
+      "attack_start": "2026-11-08T10:00:08+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 7310909500,
+        "total_attack_amount": "\u20b97,31,09,095.00",
+        "total_attack_amount_short": "\u20b97.31 Cr",
+        "amount_moved_before_alert_paise": 48415900,
+        "amount_moved_before_alert": "\u20b94,84,159.00",
+        "amount_saved_paise": 4140548000,
+        "amount_saved": "\u20b94,14,05,480.00",
+        "amount_saved_short": "\u20b94.14 Cr",
+        "next_morning_loss_paise": 7310909500,
+        "next_morning_loss": "\u20b97,31,09,095.00",
+        "first_alert_delay_seconds": 0.0
+      },
+      "events": 36381,
+      "engine_seconds": 0.645
+    },
+    {
+      "scenario": "ballari",
+      "attack_transactions": 25,
+      "expected_rules": [
+        "SG-R10"
+      ],
+      "rules_fired": [
+        "SG-R10"
+      ],
+      "open_alerts": 25,
+      "false_alerts": 0,
+      "transient_alerts": 0,
+      "detected": true,
+      "recall": 1.0,
+      "first_alert_seconds": 0.0,
+      "median_ttd_seconds": 0.0,
+      "p95_ttd_seconds": 0.0,
+      "eod_baseline_seconds": 80974.7,
+      "attack_start": "2026-11-02T11:30:25+05:30",
+      "savings": {
+        "simulated": true,
+        "label": "Estimate, simulated data",
+        "assumed_response_minutes": 15,
+        "total_attack_amount_paise": 2493397200,
+        "total_attack_amount": "\u20b92,49,33,972.00",
+        "total_attack_amount_short": "\u20b92.49 Cr",
+        "amount_moved_before_alert_paise": 80672900,
+        "amount_moved_before_alert": "\u20b98,06,729.00",
+        "amount_saved_paise": 1523966100,
+        "amount_saved": "\u20b91,52,39,661.00",
+        "amount_saved_short": "\u20b91.52 Cr",
+        "next_morning_loss_paise": 2493397200,
+        "next_morning_loss": "\u20b92,49,33,972.00",
+        "first_alert_delay_seconds": 0.0
+      },
+      "events": 36027,
+      "engine_seconds": 0.624
     }
   ]
 }

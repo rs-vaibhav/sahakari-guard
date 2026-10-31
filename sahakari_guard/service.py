@@ -37,7 +37,7 @@ from sahakari_guard.timeutil import parse_ts
 log = logging.getLogger(__name__)
 
 _SUM_KEYS = (
-    "events", "switch_events", "ledger_entries", "settlement_records", "ledger_unlinked",
+    "events", "switch_events", "ledger_entries", "settlement_records", "profile_changes", "outward_payments", "ledger_unlinked",
     "duplicate_lines_ignored", "approvals", "rrns_tracked", "evaluations", "matched", "mismatched",
 )
 
@@ -183,16 +183,27 @@ class GuardService:
                 raise IngestError(f"more than one {kind} file was uploaded; upload one file per feed")
         if "switch" not in kinds or "ledger" not in kinds:
             raise IngestError("upload at least a switch log and a core-banking ledger file")
+        self.repo.kv_set("simulation_savings", None)
         events: list[FeedEvent] = [r for p in parsed for r in p.records]
         result = self.run_batch(events, kind="upload", label=", ".join(p.name for p in parsed), sources=parsed)
         result["files"] = [p.summary() for p in parsed]
         return result
 
     def run_scenario_instant(self, scenario: str, seed: int = 42, transactions: int = 12_000, reset: bool = True) -> dict[str, Any]:
+        from sahakari_guard.bench import compute_savings
         from sahakari_guard.simulator.scenarios import build_day
 
         day = build_day(scenario, seed=seed, transactions=transactions)
-        return self.run_batch(day.events(), kind="scenario", label=f"{scenario} (seed {seed})", reset=reset)
+        result = self.run_batch(day.events(), kind="scenario", label=f"{scenario} (seed {seed})", reset=reset)
+        if day.injection:
+            alerts, _ = self.repo.list_alerts(limit=5000)
+            savings = compute_savings(day.injection, alerts, tokenizer=self.tokenizer)
+            if savings:
+                self.repo.kv_set("simulation_savings", savings)
+                result["savings"] = savings
+        else:
+            self.repo.kv_set("simulation_savings", None)
+        return result
 
     # ================================================================== outputs -> storage
 
@@ -351,13 +362,17 @@ class GuardService:
             raise NotFound(incident_id)
         alerts, total = self.repo.list_alerts(incident_id=incident_id, limit=alert_limit)
         events = self.repo.incident_events(incident_id)
-        return {
+        data = {
             "incident": self._render_incident(inc, lang),
             "alerts": [self._render_alert(a, lang) for a in alerts],
             "alerts_total": total,
             "timeline": [{**e, "label": t(lang, f"timeline.{e['action']}")} for e in events],
             "actions": t(lang, f"actions.{inc['family']}"),
         }
+        savings = self.repo.kv_get("simulation_savings")
+        if savings:
+            data["savings"] = savings
+        return data
 
     def report(self, incident_id: str, lang: str = "en") -> dict[str, Any]:
         inc = self.repo.get_incident(incident_id)

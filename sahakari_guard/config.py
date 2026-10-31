@@ -58,6 +58,32 @@ class EngineSettings:
     # Maximum masked evidence rows kept per alert.
     evidence_limit: int = 25
 
+    # SG-R9: Contact changed, then money out (Bhavnagar pattern)
+    # Window after a contact change (hours) to watch for approved outward debits.
+    contact_change_window_hours: int = 24
+    # Outward debit amount threshold in paise (default Rs 1,00,000 = 10,000,000 paise).
+    contact_change_amount_threshold: int = 100_000 * 100
+    # Outward debit count threshold within the window.
+    contact_change_count_threshold: int = 3
+    # Extra signal: threshold of distinct accounts changed by the same staff/admin ID within 1 hour.
+    admin_account_change_threshold: int = 3
+    admin_account_change_window_hours: int = 1
+
+    # SG-R10: Outward payment file mismatch (Ballari pattern)
+    # Uses match_window_seconds to match outward payment file rows with CBS ledger instructions.
+
+    # SG-R11: Unusual cumulative outward debit volume for this kind of day
+    # Known holiday dates in YYYY-MM-DD format (in addition to Sundays and 2nd/4th Saturdays).
+    holidays: tuple[str, ...] = ("2026-11-08",)
+    # Fallback cumulative outward limit in paise when no baseline is available (default Rs 50,00,000 for HOLIDAY).
+    quiet_day_outward_limit: int = 50_00_000 * 100
+    # Multiplier over p95 from the historical baseline.
+    baseline_multiplier: float = 3.0
+    # Minimum floor in paise for baseline threshold (default Rs 25,00,000).
+    baseline_floor: int = 25_00_000 * 100
+    # Optional path to a precomputed baseline JSON file.
+    baseline_path: str = ""
+
 
 @dataclass(frozen=True)
 class IncidentSettings:
@@ -103,6 +129,15 @@ def _coerce(section_cls: type, values: dict[str, Any]) -> Any:
             kwargs[key] = int(value)
             if kwargs[key] < 0:
                 raise ValueError(f"setting '{key}' must not be negative")
+        elif isinstance(default, float):
+            kwargs[key] = float(value)
+            if kwargs[key] < 0:
+                raise ValueError(f"setting '{key}' must not be negative")
+        elif isinstance(default, (list, tuple)):
+            if isinstance(value, str):
+                kwargs[key] = tuple(v.strip() for v in value.split(",") if v.strip())
+            else:
+                kwargs[key] = tuple(value)
         else:
             kwargs[key] = str(value)
     return section_cls(**kwargs)

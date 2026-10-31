@@ -22,3 +22,5 @@ inbox/
 .idea/
 .DS_Store
 Thumbs.db
+uv.lock
+

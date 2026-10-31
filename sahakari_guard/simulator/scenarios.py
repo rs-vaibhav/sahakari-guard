@@ -9,11 +9,13 @@ volumes are scaled down to a small bank.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Callable
 
 from sahakari_guard.models import Channel, Direction, MsgType
 from sahakari_guard.simulator.generator import (
+    FIRST_NAMES,
+    LAST_NAMES,
     Injection,
     SimConfig,
     SimDay,
@@ -56,7 +58,7 @@ def inject_cosmos(b: TrafficBuilder) -> Injection:
             b.add_switch(ts, rrn, Channel.ATM, Direction.DEBIT, MsgType.AUTH, "00", amount, cust,
                          country=country, terminal_id=b.terminal(Channel.ATM, country))
         b.add_settlement(ts, rrn, Channel.ATM, Direction.DEBIT, amount, cust)
-        inj.add(rrn, ts, cust.account_no)
+        inj.add(rrn, ts, cust.account_no, amount=amount)
     return inj
 
 
@@ -87,7 +89,7 @@ def inject_uco(b: TrafficBuilder) -> Injection:
             # Network reverses the remitter leg, but the faulty interface never reverses the credit.
             b.add_switch(ts + timedelta(seconds=rng.uniform(5, 12)), rrn, Channel.IMPS, Direction.CREDIT,
                          MsgType.REVERSAL, "00", amount, cust)
-            inj.add(rrn, ts, cust.account_no)
+            inj.add(rrn, ts, cust.account_no, amount=amount)
     inj.start = min((e.ts for e in b.day.switch if e.rrn in inj.rrns), default=start)
     return inj
 
@@ -109,7 +111,7 @@ def inject_replay(b: TrafficBuilder) -> Injection:
         b.add_ledger(first + timedelta(seconds=rng.uniform(2, 40)), rrn, channel, cust, Direction.DEBIT, amount,
                      narration=f"{channel.value}/{rrn}")
         b.add_settlement(ts, rrn, channel, Direction.DEBIT, amount, cust)
-        inj.add(rrn, ts, cust.account_no)
+        inj.add(rrn, ts, cust.account_no, amount=amount)
     inj.start = min(e.ts for e in b.day.switch if e.rrn in inj.rrns)
     return inj
 
@@ -138,7 +140,7 @@ def inject_tamper(b: TrafficBuilder) -> Injection:
             b.add_ledger(ts + timedelta(seconds=2), rrn, Channel.IMPS, cust, Direction.DEBIT, 100,
                          narration=f"IMPS/{rrn}")
             b.add_settlement(ts, rrn, Channel.IMPS, Direction.DEBIT, amount, cust)
-        inj.add(rrn, ts, cust.account_no)
+        inj.add(rrn, ts, cust.account_no, amount=amount)
     inj.start = min(e.ts for e in b.day.switch if e.rrn in inj.rrns)
     return inj
 
@@ -154,7 +156,7 @@ def inject_ghost(b: TrafficBuilder) -> Injection:
         amount = rng.randint(20_000, 90_000) * 100
         rrn = b.rrn(ts)
         b.add_ledger(ts, rrn, channel, cust, Direction.DEBIT, amount, narration=f"{channel.value}/{rrn}/TRANSFER")
-        inj.add(rrn, ts, cust.account_no)
+        inj.add(rrn, ts, cust.account_no, amount=amount)
     inj.start = min(e.ts for e in b.day.ledger if e.rrn in inj.rrns)
     return inj
 
@@ -171,7 +173,7 @@ def inject_missing(b: TrafficBuilder) -> Injection:
         b.add_switch(ts, rrn, Channel.UPI, Direction.CREDIT, MsgType.AUTH, "00", amount, cust,
                      counterparty=b.counterparty_vpa())
         b.add_settlement(ts, rrn, Channel.UPI, Direction.CREDIT, amount, cust)
-        inj.add(rrn, ts, cust.account_no)
+        inj.add(rrn, ts, cust.account_no, amount=amount)
     inj.start = min(e.ts for e in b.day.switch if e.rrn in inj.rrns)
     return inj
 
@@ -193,6 +195,141 @@ def inject_slow_cbs(b: TrafficBuilder) -> None:
     return None
 
 
+def inject_bhavnagar(b: TrafficBuilder) -> Injection:
+    """Sunday mobile number hijack followed by massive outward transfers.
+
+    Modelled on Bhavnagar District Co-op Bank, March 2026.
+    At 09:00-09:20 an admin ID changes registered mobile numbers on 4 accounts.
+    From 10:00, rapid IMPS/UPI outward transfers (each <= Rs 5 lakh) move ~Rs 7.34 crore
+    to ~135 different beneficiaries. Ledger posts normally (so SG-R1 stays silent).
+    Expected to fire: SG-R9 (contact changed then money out), SG-R5 (velocity), SG-R11 (unusual money-out for holiday).
+    """
+    rng = b.rng
+    victims = rng.sample(b.retail, 4)
+    admin_id = "EMP1042"
+
+    # 09:00 - 09:20: mobile number changes on 4 accounts
+    for i, cust in enumerate(victims):
+        change_ts = _at(b, 9, 0) + timedelta(minutes=i * 5, seconds=rng.uniform(10, 50))
+        old_mob = cust.mobile
+        new_mob = "98" + b._digits(8)
+        cust.mobile = new_mob
+        b.add_profile_change(
+            ts=change_ts,
+            account_no=cust.account_no,
+            field="MOBILE",
+            old_value=old_mob,
+            new_value=new_mob,
+            changed_by=admin_id,
+            channel="CBS_BRANCH",
+        )
+
+    start = _at(b, 10, 0)
+    end = _at(b, 10, 35)
+    inj = Injection("bhavnagar", start, end, expected_rules={"SG-R9", "SG-R5", "SG-R11"})
+
+    beneficiaries = [f"mule{i:03d}@{rng.choice(['okaxis', 'okhdfcbank', 'paytm', 'ybl'])}" for i in range(135)]
+    total_transfers = 150
+    duration_secs = (end - start).total_seconds()
+
+    for i in range(total_transfers):
+        offset = (i / total_transfers) * duration_secs + rng.uniform(-10, 10)
+        ts = start + timedelta(seconds=max(0, offset))
+        cust = victims[i % 4]
+        ben = beneficiaries[i % len(beneficiaries)]
+        channel = rng.choice([Channel.IMPS, Channel.UPI])
+        amount = rng.randint(480_000, 495_000) * 100  # <= Rs 5 lakh
+        rrn = b.rrn(ts)
+
+        b.add_switch(ts, rrn, channel, Direction.DEBIT, MsgType.AUTH, "00", amount, cust, counterparty=ben)
+        narration = b.narration(channel, Direction.DEBIT, rrn, cust, ben, "")
+        b.add_ledger(
+            ts + timedelta(seconds=rng.uniform(1, 3)),
+            rrn,
+            channel,
+            cust,
+            Direction.DEBIT,
+            amount,
+            narration=narration,
+        )
+        b.add_settlement(ts, rrn, channel, Direction.DEBIT, amount, cust)
+        inj.add(rrn, ts, cust.account_no, amount=amount)
+
+    inj.start = min(inj.rrn_times.values())
+    inj.end = max(inj.rrn_times.values())
+    return inj
+
+
+def inject_ballari(b: TrafficBuilder) -> Injection:
+    """NEFT/RTGS outward payment file tampering.
+
+    Modelled on Ballari DCC Bank, Karnataka, January 2025.
+    25 file rows (amount > Rs 5 lakh) have beneficiary account number and IFSC altered
+    compared to the CBS ledger instruction, totaling ~Rs 2.34 crore.
+    Expected to fire: SG-R10 (file mismatch vs ledger).
+    """
+    rng = b.rng
+    start = _at(b, 11, 30)
+    end = _at(b, 12, 15)
+    inj = Injection("ballari", start, end, expected_rules={"SG-R10"})
+
+    batch_id = f"BATCH-{b.cfg.day:%Y%m%d}-01"
+
+    # 25 altered transfers totaling ~Rs 2.34 crore
+    amounts = [rng.randint(650_000, 1_250_000) * 100 for _ in range(24)]
+    current_total = sum(amounts)
+    target_total = 23_400_000 * 100
+    rem = target_total - current_total
+    if rem < 500_000 * 100:
+        rem = 936_000 * 100
+    amounts.append(rem)
+
+    for i, amount in enumerate(amounts):
+        ts = start + timedelta(seconds=i * 90 + rng.uniform(1, 5))
+        cust = rng.choice(b.retail)
+        rail = rng.choice(["NEFT", "RTGS"])
+        channel = Channel.NEFT if rail == "NEFT" else Channel.RTGS
+        utr = f"SBIN{b.cfg.day:%y%m%d}{b._digits(8)}"
+
+        true_ben_acct = "91" + b._digits(12)
+        true_ben_ifsc = f"SBIN000{b._digits(4)}"
+        ben_name = f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
+
+        b.add_ledger(
+            ts,
+            rrn=utr,
+            channel=channel,
+            cust=cust,
+            drcr=Direction.DEBIT,
+            amount=amount,
+            narration=f"{rail}/{utr}/{ben_name}",
+            utr=utr,
+            beneficiary_account_no=true_ben_acct,
+            beneficiary_ifsc=true_ben_ifsc,
+        )
+
+        tampered_acct = "88" + b._digits(12)
+        tampered_ifsc = f"HDFC000{b._digits(4)}"
+        file_ts = ts + timedelta(seconds=rng.uniform(10, 30))
+
+        b.add_outward(
+            ts=file_ts,
+            batch_id=batch_id,
+            utr=utr,
+            rail=rail,
+            debit_account_no=cust.account_no,
+            beneficiary_account_no=tampered_acct,
+            beneficiary_ifsc=tampered_ifsc,
+            beneficiary_name=ben_name,
+            amount=amount,
+        )
+        inj.add(utr, file_ts, cust.account_no, amount=amount)
+
+    inj.start = min(inj.rrn_times.values())
+    inj.end = max(inj.rrn_times.values())
+    return inj
+
+
 @dataclass(frozen=True)
 class Scenario:
     key: str
@@ -209,6 +346,8 @@ SCENARIOS: dict[str, Scenario] = {
     "ghost": Scenario("ghost", inject_ghost, (13, 0)),
     "missing": Scenario("missing", inject_missing, (10, 0)),
     "slowcbs": Scenario("slowcbs", inject_slow_cbs, (14, 55)),
+    "bhavnagar": Scenario("bhavnagar", inject_bhavnagar, (10, 0)),
+    "ballari": Scenario("ballari", inject_ballari, (11, 30)),
 }
 
 
@@ -216,6 +355,11 @@ def build_day(scenario: str = "normal", seed: int = 42, transactions: int = 12_0
     """A full synthetic day with the chosen scenario injected."""
     if scenario not in SCENARIOS:
         raise ValueError(f"unknown scenario {scenario!r}; choose from {', '.join(SCENARIOS)}")
+    if "day" not in overrides:
+        if scenario == "bhavnagar":
+            overrides["day"] = date(2026, 11, 8)  # Sunday
+        else:
+            overrides["day"] = date(2026, 11, 2)  # Monday
     cfg = SimConfig(seed=seed, transactions=transactions, **overrides)
     builder = generate_normal_day(cfg)
     spec = SCENARIOS[scenario]
@@ -226,6 +370,10 @@ def build_day(scenario: str = "normal", seed: int = 42, transactions: int = 12_0
 
 def playback_window(day: SimDay, scenario: str) -> tuple[datetime, datetime]:
     """Event-time window to play slowly in the live demo."""
+    if scenario == "bhavnagar":
+        start = datetime.combine(day.config.day, time(9, 0), tzinfo=IST)
+        end = datetime.combine(day.config.day, time(10, 30), tzinfo=IST)
+        return start, end
     if day.injection is not None:
         start = day.injection.start - timedelta(minutes=10)
         end = day.injection.end + timedelta(minutes=25)

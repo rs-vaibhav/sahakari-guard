@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Generic, Iterable, TypeVar
@@ -22,6 +23,8 @@ from sahakari_guard.models import (
     Direction,
     LedgerEntry,
     MsgType,
+    OutwardPayment,
+    ProfileChange,
     RowError,
     SettlementRecord,
     SwitchEvent,
@@ -37,11 +40,26 @@ SWITCH_COLUMNS = (
 )
 SWITCH_REQUIRED = ("ts", "rrn", "channel", "direction", "msg_type", "response_code", "amount", "account_no")
 
-LEDGER_COLUMNS = ("ts", "journal_id", "rrn", "channel", "account_no", "drcr", "amount", "is_reversal", "narration")
+LEDGER_COLUMNS = (
+    "ts", "journal_id", "rrn", "channel", "account_no", "drcr", "amount", "is_reversal",
+    "narration", "utr", "beneficiary_account_no", "beneficiary_ifsc",
+)
 LEDGER_REQUIRED = ("ts", "journal_id", "rrn", "channel", "account_no", "drcr", "amount")
 
 SETTLEMENT_COLUMNS = ("cycle_id", "settled_at", "rrn", "channel", "direction", "amount", "status", "txn_ts", "account_no")
 SETTLEMENT_REQUIRED = ("cycle_id", "settled_at", "rrn", "channel", "direction", "amount")
+
+PROFILE_COLUMNS = ("ts", "account_no", "field", "old_value", "new_value", "changed_by", "channel")
+PROFILE_REQUIRED = ("ts", "account_no", "field", "changed_by", "channel")
+
+OUTWARD_COLUMNS = (
+    "ts", "batch_id", "utr", "rail", "debit_account_no", "beneficiary_account_no",
+    "beneficiary_ifsc", "beneficiary_name", "amount",
+)
+OUTWARD_REQUIRED = (
+    "ts", "batch_id", "utr", "rail", "debit_account_no", "beneficiary_account_no",
+    "beneficiary_ifsc", "amount",
+)
 
 MAX_ERRORS_KEPT = 500
 
@@ -97,7 +115,7 @@ def _channel(value: str) -> Channel:
     try:
         return Channel(value.strip().upper())
     except ValueError as exc:
-        raise RowParseError(f"unknown channel {value!r} (expected ATM, POS, UPI, IMPS or BRANCH)") from exc
+        raise RowParseError(f"unknown channel {value!r} (expected ATM, POS, UPI, IMPS, NEFT, RTGS or BRANCH)") from exc
 
 
 def _direction(value: str) -> Direction:
@@ -177,6 +195,9 @@ def row_to_ledger(row: dict, line: int = 0) -> LedgerEntry:
         amount=_amount(_req(row, "amount")),
         is_reversal=_bool(row.get("is_reversal")),
         narration=(row.get("narration") or "").strip(),
+        utr=(row.get("utr") or "").strip(),
+        beneficiary_account_no=(row.get("beneficiary_account_no") or "").strip(),
+        beneficiary_ifsc=(row.get("beneficiary_ifsc") or "").strip().upper(),
         source_line=line,
     )
 
@@ -196,16 +217,51 @@ def row_to_settlement(row: dict, line: int = 0) -> SettlementRecord:
     )
 
 
+def row_to_profile(row: dict, line: int = 0) -> ProfileChange:
+    field_val = _req(row, "field").strip().upper()
+    return ProfileChange(
+        ts=_ts(_req(row, "ts")),
+        account_no=_req(row, "account_no"),
+        field=field_val,
+        old_value=(row.get("old_value") or "").strip(),
+        new_value=(row.get("new_value") or "").strip(),
+        changed_by=_req(row, "changed_by"),
+        channel=(row.get("channel") or "").strip().upper(),
+        source_line=line,
+    )
+
+
+def row_to_outward(row: dict, line: int = 0) -> OutwardPayment:
+    return OutwardPayment(
+        ts=_ts(_req(row, "ts")),
+        batch_id=_req(row, "batch_id"),
+        utr=_req(row, "utr"),
+        rail=_req(row, "rail").strip().upper(),
+        debit_account_no=_req(row, "debit_account_no"),
+        beneficiary_account_no=_req(row, "beneficiary_account_no"),
+        beneficiary_ifsc=_req(row, "beneficiary_ifsc").strip().upper(),
+        beneficiary_name=(row.get("beneficiary_name") or "").strip(),
+        amount=_amount(_req(row, "amount")),
+        source_line=line,
+    )
+
+
 FEEDS: dict[str, tuple[tuple[str, ...], Callable[[dict, int], object]]] = {
     "switch": (SWITCH_REQUIRED, row_to_switch),
     "ledger": (LEDGER_REQUIRED, row_to_ledger),
     "settlement": (SETTLEMENT_REQUIRED, row_to_settlement),
+    "profile": (PROFILE_REQUIRED, row_to_profile),
+    "outward": (OUTWARD_REQUIRED, row_to_outward),
 }
 
 
 def detect_kind(header: Iterable[str]) -> str | None:
     """Guess which feed a CSV belongs to from its header."""
     cols = {h.strip().lower() for h in header if h}
+    if set(OUTWARD_REQUIRED) <= cols:
+        return "outward"
+    if set(PROFILE_REQUIRED) <= cols:
+        return "profile"
     if set(SWITCH_REQUIRED) <= cols:
         return "switch"
     if set(LEDGER_REQUIRED) <= cols:
@@ -222,8 +278,63 @@ def _decode(data: bytes, name: str) -> str:
         raise IngestError(f"{name}: file is not UTF-8 text") from exc
 
 
+def parse_outward_xml(data: bytes, name: str) -> ParseResult[OutwardPayment]:
+    data_lower = data.lower()
+    if b"<!doctype" in data_lower or b"<!entity" in data_lower:
+        raise IngestError(f"{name}: XML with DTD or entity declarations is rejected for safety")
+
+    text = _decode(data, name)
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as exc:
+        raise IngestError(f"{name}: invalid XML: {exc}") from exc
+
+    result: ParseResult[OutwardPayment] = ParseResult(
+        kind="outward", name=name, sha256=hashlib.sha256(data).hexdigest()
+    )
+    lines = text.splitlines()
+    payment_lines: list[int] = [i + 1 for i, l in enumerate(lines) if "<payment" in l.lower()]
+
+    payments = root.findall(".//Payment")
+    if not payments and root.tag.lower() == "payment":
+        payments = [root]
+
+    for i, elem in enumerate(payments):
+        line = payment_lines[i] if i < len(payment_lines) else (i + 1)
+        result.rows += 1
+
+        def get_f(tag: str) -> str:
+            child = elem.find(tag)
+            if child is not None and child.text:
+                return child.text.strip()
+            return (elem.attrib.get(tag) or "").strip()
+
+        row_dict = {
+            "ts": get_f("ts"),
+            "batch_id": get_f("batch_id"),
+            "utr": get_f("utr"),
+            "rail": get_f("rail"),
+            "debit_account_no": get_f("debit_account_no"),
+            "beneficiary_account_no": get_f("beneficiary_account_no"),
+            "beneficiary_ifsc": get_f("beneficiary_ifsc"),
+            "beneficiary_name": get_f("beneficiary_name"),
+            "amount": get_f("amount"),
+        }
+        try:
+            result.records.append(row_to_outward(row_dict, line))
+        except RowParseError as exc:
+            result.error_count += 1
+            if len(result.errors) < MAX_ERRORS_KEPT:
+                result.errors.append(RowError(line, str(exc)))
+    return result
+
+
 def parse_bytes(data: bytes, name: str, kind: str | None = None) -> ParseResult:
-    """Parse a CSV feed from bytes. ``kind`` is detected from the header if omitted."""
+    """Parse a feed from bytes. If XML, parses as outward payment feed. CSV kind is detected from the header if omitted."""
+    stripped = data.strip()
+    if stripped.startswith(b"<") or name.lower().endswith(".xml"):
+        return parse_outward_xml(data, name)
+
     text = _decode(data, name)
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
@@ -234,7 +345,7 @@ def parse_bytes(data: bytes, name: str, kind: str | None = None) -> ParseResult:
     if kind not in FEEDS:
         raise IngestError(
             f"{name}: could not recognise the columns {reader.fieldnames}. "
-            "Expected a switch log, CBS ledger or settlement file (see docs/DATA_FORMATS.md)."
+            "Expected a switch log, CBS ledger, settlement, profile changes, or outward payments file (see docs/DATA_FORMATS.md)."
         )
     required, converter = FEEDS[kind]
     missing = [c for c in required if c not in reader.fieldnames]
@@ -286,11 +397,16 @@ def switch_to_row(e: SwitchEvent) -> dict:
 
 
 def ledger_to_row(e: LedgerEntry) -> dict:
-    return {
+    row = {
         "ts": iso(e.ts), "journal_id": e.journal_id, "rrn": e.rrn, "channel": e.channel.value,
         "account_no": e.account_no, "drcr": e.drcr.value, "amount": paise_to_str(e.amount),
         "is_reversal": "1" if e.is_reversal else "0", "narration": e.narration,
     }
+    if e.utr or e.beneficiary_account_no or e.beneficiary_ifsc:
+        row["utr"] = e.utr
+        row["beneficiary_account_no"] = e.beneficiary_account_no
+        row["beneficiary_ifsc"] = e.beneficiary_ifsc
+    return row
 
 
 def settlement_to_row(e: SettlementRecord) -> dict:
@@ -298,6 +414,32 @@ def settlement_to_row(e: SettlementRecord) -> dict:
         "cycle_id": e.cycle_id, "settled_at": iso(e.ts), "rrn": e.rrn, "channel": e.channel.value,
         "direction": e.direction.value, "amount": paise_to_str(e.amount), "status": e.status,
         "txn_ts": iso(e.txn_ts) or "", "account_no": e.account_no,
+    }
+
+
+def profile_to_row(p: ProfileChange) -> dict:
+    return {
+        "ts": iso(p.ts),
+        "account_no": p.account_no,
+        "field": p.field,
+        "old_value": p.old_value,
+        "new_value": p.new_value,
+        "changed_by": p.changed_by,
+        "channel": str(p.channel.value if hasattr(p.channel, "value") else p.channel),
+    }
+
+
+def outward_to_row(o: OutwardPayment) -> dict:
+    return {
+        "ts": iso(o.ts),
+        "batch_id": o.batch_id,
+        "utr": o.utr,
+        "rail": o.rail,
+        "debit_account_no": o.debit_account_no,
+        "beneficiary_account_no": o.beneficiary_account_no,
+        "beneficiary_ifsc": o.beneficiary_ifsc,
+        "beneficiary_name": o.beneficiary_name,
+        "amount": paise_to_str(o.amount),
     }
 
 
@@ -311,3 +453,11 @@ def write_ledger_csv(entries: Iterable[LedgerEntry], path: Path | None = None) -
 
 def write_settlement_csv(records: Iterable[SettlementRecord], path: Path | None = None) -> str:
     return _write(path, SETTLEMENT_COLUMNS, (settlement_to_row(e) for e in records))
+
+
+def write_profile_csv(events: Iterable[ProfileChange], path: Path | None = None) -> str:
+    return _write(path, PROFILE_COLUMNS, (profile_to_row(e) for e in events))
+
+
+def write_outward_csv(payments: Iterable[OutwardPayment], path: Path | None = None) -> str:
+    return _write(path, OUTWARD_COLUMNS, (outward_to_row(e) for e in payments))

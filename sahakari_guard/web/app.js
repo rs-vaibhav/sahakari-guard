@@ -426,6 +426,19 @@ views.incident = async (main, id) => {
         <div class="btn-row" style="margin-top:10px"><a class="btn" href="${withKey(`/api/incidents/${i.incident_id}/report.json?lang=${state.lang}&download=true`)}">${t("incident.download_json")}</a></div>
       </section>
     </div>
+    ${d.savings ? html`
+    <div class="panel" style="margin-top:16px;background:#f0fdf4;border:1px solid #bbf7d0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2 style="color:#166534;margin:0">${t("savings.title")}</h2>
+        <span class="pill" style="background:#dcfce7;color:#15803d;font-size:0.75rem">${d.savings.label}</span>
+      </div>
+      <div class="facts-grid" style="margin-top:12px">
+        <div><div class="k">${t("savings.total_attack")}</div><div class="v">${d.savings.total_attack_amount}</div></div>
+        <div><div class="k">${t("savings.moved_before_alert")}</div><div class="v">${d.savings.amount_moved_before_alert}</div></div>
+        <div><div class="k">${t("savings.estimated_saved", { assumed_response_minutes: d.savings.assumed_response_minutes })}</div><div class="v" style="color:#16a34a">${d.savings.amount_saved}</div></div>
+        <div><div class="k">${t("savings.next_morning")}</div><div class="v" style="color:#dc2626">${d.savings.next_morning_loss}</div></div>
+      </div>
+    </div>` : ""}
     <div class="facts-grid">
       <div><div class="k">${t("incident.alerts")}</div><div class="v">${fmtInt(i.open_alert_count)}</div></div>
       <div><div class="k">${t("incident.amount")}</div><div class="v">${i.amount}</div></div>
@@ -560,6 +573,7 @@ views.demo = async (main) => {
 // the controls are rebuilt only when the demo starts or stops; the status and the
 // network section are refreshed in place on every poll.
 function playerStatus(d, s) {
+  const sav = d.savings || (s.top_incident && s.top_incident.savings);
   return html`
     <div class="muted small">${t("demo.clock")}</div>
     <div class="clock">${fmtClock(d.sim_clock)}</div>
@@ -570,6 +584,17 @@ function playerStatus(d, s) {
       <dt>${t("demo.alerts_so_far")}</dt><dd>${fmtInt(d.new_alerts || 0)}</dd>
       <dt>${t("kpi.open_incidents")}</dt><dd>${fmtInt(s.kpi.open_incidents)}</dd>
     </dl>
+    ${sav ? html`
+      <div style="margin-top:12px;padding:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;">
+        <div style="font-weight:600;color:#166534;font-size:0.85rem">${t("savings.title")}</div>
+        <div style="font-size:0.75rem;color:#15803d;margin-bottom:6px">${sav.label}</div>
+        <dl style="margin:0;font-size:0.8rem">
+          <dt>${t("savings.total_attack")}</dt><dd style="font-weight:600">${sav.total_attack_amount}</dd>
+          <dt>${t("savings.moved_before_alert")}</dt><dd>${sav.amount_moved_before_alert}</dd>
+          <dt>${t("savings.estimated_saved", { assumed_response_minutes: sav.assumed_response_minutes })}</dt><dd style="font-weight:700;color:#16a34a">${sav.amount_saved}</dd>
+          <dt>${t("savings.next_morning")}</dt><dd style="color:#dc2626">${sav.next_morning_loss}</dd>
+        </dl>
+      </div>` : ""}
     ${d.error ? notice(d.error, "error") : ""}`;
 }
 
@@ -655,6 +680,8 @@ views.upload = async (main) => {
         <label class="field"><span>${t("upload.switch")}</span><input type="file" id="u-switch" accept=".csv,text/csv"></label>
         <label class="field"><span>${t("upload.ledger")}</span><input type="file" id="u-ledger" accept=".csv,text/csv"></label>
         <label class="field"><span>${t("upload.settlement")}</span><input type="file" id="u-settlement" accept=".csv,text/csv"></label>
+        <label class="field"><span>${t("upload.profile")}</span><input type="file" id="u-profile" accept=".csv,text/csv"></label>
+        <label class="field"><span>${t("upload.outward")}</span><input type="file" id="u-outward" accept=".csv,.xml,text/csv,text/xml,application/xml"></label>
         <button class="btn primary" id="u-run">${t("upload.run")}</button>
         <p class="small muted" style="margin-bottom:0">${t("upload.samples")}: ${sample("switch", "switch_log.csv")} · ${sample("ledger", "cbs_ledger.csv")} · ${sample("settlement", "settlement.csv")}</p>
       </section>
@@ -662,7 +689,7 @@ views.upload = async (main) => {
     </div>`);
   $("#u-run").addEventListener("click", async () => {
     const out = $("#u-out");
-    const files = ["switch", "ledger", "settlement"].map((k) => $(`#u-${k}`).files[0]).filter(Boolean);
+    const files = ["switch", "ledger", "settlement", "profile", "outward"].map((k) => $(`#u-${k}`).files[0]).filter(Boolean);
     if (!$("#u-switch").files[0] || !$("#u-ledger").files[0]) { setHTML(out, notice(t("upload.need_files"), "error")); return; }
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f, f.name));

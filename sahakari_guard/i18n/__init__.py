@@ -48,13 +48,28 @@ def t(lang: str, key: str, **params: Any) -> Any:
     return value
 
 
-AMOUNT_KEYS = ("amount", "switch_amount", "ledger_amount")
+AMOUNT_KEYS = ("amount", "switch_amount", "ledger_amount", "today_amount", "normal_amount", "threshold")
 
 
 def render_alert(lang: str, rule_id: str, params: dict[str, Any]) -> dict[str, str]:
     """Return {'name', 'message'} for an alert, with amounts formatted in rupees."""
     lang = normalise_lang(lang)
     fmt = dict(params)
+    defaults = {
+        "field": "MOBILE",
+        "changed_by": "STAFF",
+        "window_hours": 24,
+        "utr": fmt.get("rrn", ""),
+        "reason": "mismatch",
+        "today_amount": fmt.get("amount", 0),
+        "normal_amount": 0,
+        "day_type": "HOLIDAY",
+        "hour": 10,
+        "threshold": fmt.get("amount", 0),
+    }
+    for k, v in defaults.items():
+        if k not in fmt:
+            fmt[k] = v
     for key in AMOUNT_KEYS:
         if isinstance(fmt.get(key), int):
             fmt[key] = format_inr(fmt[key])

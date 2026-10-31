@@ -24,7 +24,14 @@ from sahakari_guard import __version__
 from sahakari_guard.config import SUPPORTED_LANGUAGES, Settings, load_settings
 from sahakari_guard.i18n import catalog, normalise_lang
 from sahakari_guard.incidents.manager import InvalidTransition, NotFound
-from sahakari_guard.ingest.parsers import IngestError, write_ledger_csv, write_settlement_csv, write_switch_csv
+from sahakari_guard.ingest.parsers import (
+    IngestError,
+    write_ledger_csv,
+    write_outward_csv,
+    write_profile_csv,
+    write_settlement_csv,
+    write_switch_csv,
+)
 from sahakari_guard.models import event_sort_key
 from sahakari_guard.service import Busy, GuardService
 from sahakari_guard.simulator.scenarios import SCENARIOS, build_day
@@ -106,14 +113,20 @@ class PayloadTooLarge(ValueError):
     pass
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=32)
 def _sample_csv(scenario: str, kind: str) -> str:
     day = build_day(scenario, seed=7, transactions=1500)
     if kind == "switch":
         return write_switch_csv(sorted(day.switch, key=event_sort_key))
     if kind == "ledger":
         return write_ledger_csv(sorted(day.ledger, key=event_sort_key))
-    return write_settlement_csv(sorted(day.settlement, key=event_sort_key))
+    if kind == "settlement":
+        return write_settlement_csv(sorted(day.settlement, key=event_sort_key))
+    if kind == "profile":
+        return write_profile_csv(sorted(day.profile, key=event_sort_key))
+    if kind == "outward":
+        return write_outward_csv(sorted(day.outward, key=event_sort_key))
+    raise NotFound(f"{scenario}/{kind}")
 
 
 def _error(status: int, message: str) -> JSONResponse:
@@ -273,16 +286,22 @@ def create_app(settings: Settings | None = None, service: GuardService | None = 
 
     @app.post("/api/upload")
     async def upload(files: list[UploadFile] = File(...)) -> dict[str, Any]:
-        if len(files) > 3:
-            raise IngestError("upload at most three files: switch log, ledger and settlement")
+        if len(files) > 5:
+            raise IngestError("upload at most five files: switch log, ledger, settlement, profile changes and outward payments")
         payload = [(f.filename or "upload.csv", await _read_limited(f, MAX_UPLOAD_BYTES)) for f in files]
         return svc.scan_uploads(payload)
 
     @app.get("/api/samples/{scenario}/{kind}.csv")
     def sample(scenario: str, kind: str) -> Response:
-        if scenario not in SCENARIOS or kind not in ("switch", "ledger", "settlement"):
+        if scenario not in SCENARIOS or kind not in ("switch", "ledger", "settlement", "profile", "outward"):
             raise NotFound(f"{scenario}/{kind}")
-        filename = {"switch": "switch_log", "ledger": "cbs_ledger", "settlement": "settlement"}[kind]
+        filename = {
+            "switch": "switch_log",
+            "ledger": "cbs_ledger",
+            "settlement": "settlement",
+            "profile": "profile_changes",
+            "outward": "outward_payments",
+        }[kind]
         return Response(
             _sample_csv(scenario, kind),
             media_type="text/csv; charset=utf-8",
